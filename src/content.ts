@@ -13,7 +13,7 @@ export type Scene = {
   /** the camera leans up towards the sky in this scene (where the project constellations are) */
   lookUp?: boolean;
   /** monuments that rise out of the ground in this scene: Göbeklitepe's pillars or the Orkhon steles */
-  monuments?: "gobekli" | "orkhon";
+  monuments?: "gobekli" | "orkhon" | "derinkuyu";
 };
 
 /** A project, as a constellation in the upper sky: its initial in Old Turkic letters, and the panel it opens. */
@@ -152,6 +152,19 @@ export const SCENES: Scene[] = [
     },
     monuments: "gobekli",
   },
+  /*
+   * Derinkuyu, set aside for now (the scene works, see scene/derinkuyu.ts, but is not right yet):
+   *   {
+   *     the cover slides off an air shaft and the view looks down into the underground city
+   *     shapes: [stoneDraw(() => {}, { runeColor: "#ffb070" })],
+   *     title: { tr: "Derinkuyu", en: "Derinkuyu" },
+   *     body: {
+   *       tr: "Kapadokya'nın yumuşak tüf kayasına kat kat oyulmuş bir yeraltı şehri: ahırlar, mutfaklar, şaraphaneler, bir kilise ve hepsini kesen bir hava bacası. Kapıları yuvarlak taşlarla kapanır. Kazılmaya Friglerin zamanında, MÖ 8. ya da 7. yüzyılda başlandığı düşünülür.",
+   *       en: "An underground city carved level under level into Cappadocia's soft tuff: stables, kitchens, wineries, a church, and an air shaft through them all. Round stones roll across its doors. It is thought to have been begun by the Phrygians, in the 8th or 7th century BC.",
+   *     },
+   *     monuments: "derinkuyu",
+   *   },
+   */
   {
     /* the stones step aside for the three Orkhon steles */
     shapes: [stoneDraw(() => {}, { runeColor: "#ffb347" })],

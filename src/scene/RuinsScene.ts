@@ -13,6 +13,7 @@ import {
 } from "./glsl";
 import { createGroundGeometry } from "./ground";
 import { createEnclosure, type Site } from "./gobekli";
+import { createDerinkuyu, DERIN } from "./derinkuyu";
 import { createRealm, type Card } from "./realm";
 import { createSky, type SkyProject } from "./sky";
 import {
@@ -70,8 +71,8 @@ export type RuinsOptions = {
   projects?: SkyProject[];
   /** a project constellation was touched (its index), or the open one closed (-1) */
   onProject?: (project: number) => void;
-  /** the monuments the first scene raises, if any */
-  site?: Site;
+  /** the monuments the first scene raises (or Derinkuyu, which it opens), if any */
+  site?: Site | "derinkuyu";
 };
 
 /**
@@ -176,7 +177,18 @@ export class RuinsScene {
   private readonly camBase = new THREE.Vector3(1.6, 0.9, CAM_Z);
   /* Göbeklitepe's pillars and the Orkhon steles, each raised out of the ground in its own scene */
   private readonly monuments = new Map<Site, ReturnType<typeof createEnclosure>>();
-  private site: Site | undefined;
+  private site: Site | "derinkuyu" | undefined;
+  /* Derinkuyu: the cover slides off an air shaft and the view comes over it to look down into the underground city */
+  private readonly derin: ReturnType<typeof createDerinkuyu>;
+  /* the shaft's mouth in the ground: x, z of its middle, its half width, and whether it is there */
+  private readonly shaft = { value: new THREE.Vector4(DERIN.SX, DERIN.SZ, DERIN.A, 0) };
+  /* how far the view has gone over to the shaft, 0 to 1 */
+  private derinView = 0;
+  private readonly torch = new THREE.Vector3();
+  private readonly tmpKick = new THREE.Vector3();
+  private readonly tmpLook = new THREE.Vector3();
+  private readonly level = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private monumentTimer = 0;
   private lastGrind = 0;
   private readonly look = new THREE.Vector3(0, -0.1, 0);
 
@@ -254,6 +266,7 @@ export class RuinsScene {
       sh.uniforms.uDetail = this.uni.uDetail;
       sh.uniforms.uRune = this.uni.uRune;
       sh.uniforms.uWave = this.wave;
+      sh.uniforms.uShaft = this.shaft;
       sh.uniforms.uHolesRect = {
         value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D),
       };
@@ -266,7 +279,12 @@ export class RuinsScene {
       sh.fragmentShader = sh.fragmentShader
         .replace(
           "#include <common>",
-          `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave;\n${GROUND_FN}`,
+          `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave; uniform vec4 uShaft;\n${GROUND_FN}`,
+        )
+        /* Derinkuyu: the air shaft's mouth */
+        .replace(
+          "#include <clipping_planes_fragment>",
+          "#include <clipping_planes_fragment>\nif (uShaft.w > .5 && abs(vGPos.x - uShaft.x) < uShaft.z && abs(vGPos.z - uShaft.y) < uShaft.z) discard;",
         )
         .replace(
           "#include <color_fragment>",
@@ -303,6 +321,13 @@ export class RuinsScene {
         else sound.hit(0.45, x / this.hw, 0.85);
       },
     };
+    this.derin = createDerinkuyu(this.uni.uDetail, this.uni.uTime, {
+      /* the cover grinds off the curb, and comes down on the ground with a boulder's weight */
+      onOpen: () => sound.emerge(1.9, 0.3, true),
+      onOpened: () => this.land(0.75, 3, this.hh * 0.4),
+      onRoll: (x) => sound.emerge(1.1, x / this.hw, false),
+    });
+    scene.add(this.derin.group);
     for (const site of ["gobekli", "orkhon"] as const) {
       const m = createEnclosure(this.uni.uDetail, this.uni.uRune, this.uni.uTime, events, site);
       this.monuments.set(site, m);
@@ -574,10 +599,10 @@ vNormalMapUv = leafUv;
   }
 
   /** Float the stones into a shape; several shapes take turns every few seconds. */
-  show(shapes: Shape[], lookUp = false, site?: Site) {
+  show(shapes: Shape[], lookUp = false, site?: Site | "derinkuyu") {
     this.lookUp = lookUp;
     this.site = site;
-    if (this.started) this.monuments.forEach((m, s) => m.set(s === site));
+    if (this.started) this.raise(site);
     this.sequence = shapes;
     this.seqIndex = 0;
     this.seqTimer = 0;
@@ -599,7 +624,7 @@ vNormalMapUv = leafUv;
     this.sky.show();
     this.opts.onStart();
     const site = this.site;
-    if (site) window.setTimeout(() => this.monuments.get(site)?.set(true), 1200);
+    if (site) window.setTimeout(() => this.raise(site), 1200);
     const st = this.field.stones[0];
     if (!st) {
       this.assign(this.sequence[this.seqIndex], true);
@@ -644,23 +669,12 @@ vNormalMapUv = leafUv;
     /* impact: the stone stays sunk where it hit, the ground shakes, a wave of rune light runs out across the rock,
        and the stones begin to break free of it */
     this.strikeT = -1;
-    st.mode = "rest";
+    /* still held by the script: it sinks on from here (see sink) */
+    st.mode = "script";
     st.restY = st.p.y;
     st.q.setFromEuler(st.r);
     st.v.set(0, 0, 0);
     st.w.set(0, 0, 0);
-    /* it leaves its hole in the rock when it rises again */
-    const ground = this.field.floorAt(st.p.x, st.p.z),
-      depth = ground - (st.p.y - st.size.y / 2);
-    this.addPit(
-      st.p.x,
-      ground - depth / 2,
-      st.p.z,
-      st.size.x * 1.02,
-      st.size.z * 1.02,
-      depth,
-      st.r.y,
-    );
     this.wave.value.set(st.p.x, st.p.z, 0, 1);
     this.field.shake = 0.35;
     /* the heaviest landing of all: the boulders' own sound at full weight, and the hardest jolt to the view */
@@ -669,10 +683,26 @@ vNormalMapUv = leafUv;
       this.kickV.x += (Math.random() - 0.5) * 1.2;
       this.kickV.y -= 2.6;
     }
-    window.setTimeout(
-      () => this.assign(this.sequence[this.seqIndex], true),
-      250,
-    );
+    /* and then it keeps going: the rock takes it in, and leaves no hole */
+    this.sinkT = 0;
+  }
+
+  /* the struck stone sinks on down into the rock, grinding, and is gone; then the first scene comes */
+  private sinkT = -1;
+  private sink(dt: number) {
+    const t = (this.sinkT += dt),
+      st = this.field.stones[0];
+    if (t > 0.15 && t - dt <= 0.15) sound.crack(0);
+    if (!st) { this.sinkT = -1; return; }
+    const k = Math.min(1, Math.max(0, t - 0.15) / 1.1);
+    st.p.y = st.restY - k * k * st.size.y * 1.2;
+    st.r.x = Math.sin(t * 43) * 0.012 * (1 - k);
+    st.r.z = (st.spot?.tilt ?? 0) + Math.sin(t * 37) * 0.012 * (1 - k);
+    this.field.shake = Math.max(this.field.shake, 0.06 * (1 - k));
+    if (k < 1) return;
+    this.sinkT = -1;
+    this.field.stones.splice(0, 1);
+    this.assign(this.sequence[this.seqIndex], true);
   }
 
   /** The opening stone: one stone hovering in the middle, ivy over it, a rune like a target cut in it (𐰧, Yenisei ENT). */
@@ -753,6 +783,20 @@ vNormalMapUv = leafUv;
     this.realm.setCard(card);
   }
 
+  /**
+   * Raise the scene's monuments (or open Derinkuyu) and put the others away. Coming from Derinkuyu the ground has to
+   * close first, or what rises would be seen under it.
+   */
+  private raise(site: Site | "derinkuyu" | undefined) {
+    clearTimeout(this.monumentTimer);
+    this.derin.set(site === "derinkuyu");
+    const up = () => this.monuments.forEach((m, s) => m.set(s === site));
+    if (this.derin.open > 0 && site !== "derinkuyu") {
+      this.monuments.forEach((m) => m.set(false));
+      this.monumentTimer = window.setTimeout(up, 1700);
+    } else up();
+  }
+
   /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
   private addPit(
     x: number,
@@ -805,6 +849,7 @@ vNormalMapUv = leafUv;
       (h * Math.min(window.devicePixelRatio || 1, 1.5)) /
       (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
     this.monuments.forEach((m) => m.resize(px));
+    this.derin.resize(px);
     this.hh =
       Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * CAM_Z * 0.82;
     this.hw = this.hh * this.camera.aspect;
@@ -1017,6 +1062,7 @@ vNormalMapUv = leafUv;
       }
     }
     if (this.strikeT >= 0) this.strike(dt);
+    else if (this.sinkT >= 0) this.sink(dt);
     else this.uni.uGate.value *= Math.exp(-dt * 3);
     if (this.wave.value.z >= 0 && this.wave.value.z < 10)
       this.wave.value.z += dt;
@@ -1078,7 +1124,9 @@ vNormalMapUv = leafUv;
     this.lamp.color.copy(u.uRune.value);
     u.uHas.value = this.pointer.has ? 1 : 0;
     u.uMouse.value.set(this.pointer.x, this.pointer.y, 0);
-    this.lamp.position.set(this.pointer.x, this.pointer.y, 1.4);
+    /* over Derinkuyu's shaft the pointer's light is held down into it, a lamp to see the walls by */
+    if (this.derinView > 0.5) this.lamp.position.copy(this.torch);
+    else this.lamp.position.set(this.pointer.x, this.pointer.y, 1.4);
     this.lamp.intensity +=
       ((this.pointer.has ? 1.8 * PI : 0) - this.lamp.intensity) *
       Math.min(1, dt * 5);
@@ -1123,6 +1171,22 @@ vNormalMapUv = leafUv;
       );
     this.lookCur.lerp(this.lookWant, Math.min(1, dt * (focus ? 2.2 : 6)));
     this.camera.lookAt(this.lookCur);
+    /* over Derinkuyu: the view goes over to the shaft's mouth and looks down it */
+    this.derinView += ((this.started && this.site === "derinkuyu" ? 1 : 0) - this.derinView) * Math.min(1, dt * 1.3);
+    if (this.derinView > 0.001) {
+      const f = this.derinView * this.derinView * (3 - 2 * this.derinView);
+      const v = this.derin.view(this.gaze, -this.hh * 0.96);
+      this.camera.position.lerp(v.pos, f).add(this.tmpKick.set(this.kick.x, this.kick.y, 0).multiplyScalar(f * 0.5));
+      this.camera.lookAt(this.tmpLook.copy(this.lookCur).lerp(v.look, f));
+      /* the light held down into the shaft, where the pointer points, at the second level's height */
+      this.camera.updateMatrixWorld();
+      this.ray.setFromCamera(this.ndc, this.camera);
+      this.level.constant = this.hh * 0.96 + 3;
+      if (this.ray.ray.intersectPlane(this.level, this.torch)) {
+        this.torch.x = THREE.MathUtils.clamp(this.torch.x, DERIN.SX - DERIN.A + 0.3, DERIN.SX + DERIN.A - 0.3);
+        this.torch.z = THREE.MathUtils.clamp(this.torch.z, DERIN.SZ - DERIN.A + 0.3, DERIN.SZ + DERIN.A - 0.3);
+      }
+    }
     /* and leans in on an open nebula */
     const fov =
       this.baseFov *
@@ -1133,6 +1197,8 @@ vNormalMapUv = leafUv;
     }
     this.camera.updateMatrixWorld();
     this.monuments.forEach((m) => m.update(dt, this.hh, this.camera, this.ndc, this.pointer.has, this.reduced));
+    this.derin.update(dt, -this.hh * 0.96, this.camera, this.ndc, this.pointer.has, this.reduced);
+    this.shaft.value.w = this.derin.group.visible ? 1 : 0;
     this.realmT = THREE.MathUtils.clamp(
       this.realmT + (this.realmWant ? dt : -dt) / 1.6,
       0,
