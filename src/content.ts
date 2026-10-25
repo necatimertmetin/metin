@@ -1,4 +1,4 @@
-import { puzzlePiece, stoneText, type Shape } from "./scene/shapes";
+import { puzzlePiece, stoneDraw, stoneText, type Shape } from "./scene/shapes";
 import { cursorArrow, stele, university } from "./scene/marks";
 import { RUNE_FONT } from "./scene/textures";
 
@@ -12,6 +12,8 @@ export type Scene = {
   body: Text;
   /** the camera leans up towards the sky in this scene (where the project constellations are) */
   lookUp?: boolean;
+  /** monuments that rise out of the ground in this scene: Göbeklitepe's pillars or the Orkhon steles */
+  monuments?: "gobekli" | "orkhon";
 };
 
 /** A project, as a constellation in the upper sky: its initial in Old Turkic letters, and the panel it opens. */
@@ -138,14 +140,42 @@ export const PROJECTS: Project[] = [
 /** GoatCounter site code (the part before .goatcounter.com); empty sends nothing */
 export const GOATCOUNTER = "";
 
-/** The story, one scene per scroll step. */
+/** The story, one scene per scroll step, in the order of history: the first temple, the first Turkic writing, then mine. */
 export const SCENES: Scene[] = [
+  {
+    /* the stones step aside: the pillars of the first temple come up out of the ground in their place */
+    shapes: [stoneDraw(() => {}, { runeColor: "#ff9d5c" })],
+    title: { tr: "Göbeklitepe", en: "Göbeklitepe" },
+    body: {
+      tr: "On iki bin yıl önce, yazıdan da tekerlekten de önce, insanlar dev T taşları dikip üstlerine tilki, yaban domuzu ve akbaba kazıdı. Taşa anlam vermenin bilinen en eski hali.",
+      en: "Twelve thousand years ago, before writing and before the wheel, people raised great T-shaped pillars and carved foxes, boars and vultures into them. The oldest known meaning cut in stone.",
+    },
+    monuments: "gobekli",
+  },
+  {
+    /* the stones step aside for the three Orkhon steles */
+    shapes: [stoneDraw(() => {}, { runeColor: "#ffb347" })],
+    title: { tr: "Orhun Yazıtları", en: "Orkhon Inscriptions" },
+    body: {
+      tr: "Tonyukuk, Bilge Kağan ve Kül Tigin anıtları. 8. yüzyılda Göktürk harfleriyle taşa kazınan, bilinen en eski Türkçe metinler.",
+      en: "The monuments of Tonyukuk, Bilge Kağan and Kül Tigin: the oldest known Turkic texts, cut in stone in Old Turkic letters in the 8th century.",
+    },
+    monuments: "orkhon",
+  },
   {
     shapes: [stoneText("METİN", { rows: 14, maxW: 0.8, maxH: 0.46 })],
     title: { tr: "Metin", en: "Metin" },
     body: {
       tr: "Hem yazı, hem taş. Bilinen ilk Türkçe metinlerden bazıları taşa kazındı. Mert Metin, frontend geliştirici.",
       en: "Text, and stone. Some of the earliest known Turkic texts were carved in stone. Mert Metin, frontend developer.",
+    },
+  },
+  {
+    shapes: [university],
+    title: { tr: "Üniversite", en: "University" },
+    body: {
+      tr: "Trakya Üniversitesi'nde bilgisayar mühendisliği okudum. Taşlar okulun Edirne'deki rektörlük binasını, eski Karaağaç Garı'nı kuruyor.",
+      en: "I studied computer engineering at Trakya University. The stones build its rectorate in Edirne, the old Karaağaç railway station.",
     },
   },
   {
@@ -166,32 +196,6 @@ export const SCENES: Scene[] = [
     body: {
       tr: "Bugün ABD'deki bir ekip için Amazon satıcılarına yönelik bir platformu uçtan uca tek başıma kuruyorum. Taşlar adımı Göktürk harfleriyle yazıyor.",
       en: "Today I build a platform for Amazon sellers end to end, on my own, for a team in the US. The stones write my name in Old Turkic letters.",
-    },
-  },
-  {
-    shapes: [university],
-    title: { tr: "Üniversite", en: "University" },
-    body: {
-      tr: "Trakya Üniversitesi'nde bilgisayar mühendisliği okudum. Taşlar okulun Edirne'deki rektörlük binasını, eski Karaağaç Garı'nı kuruyor.",
-      en: "I studied computer engineering at Trakya University. The stones build its rectorate in Edirne, the old Karaağaç railway station.",
-    },
-  },
-  {
-    /* "Türk" in Orkhon letters, which run right to left */
-    shapes: [
-      stoneText("\u{10C45}\u{10C07}\u{10C3C}\u{10C1A}", {
-        font: RUNE_FONT,
-        weight: 400,
-        outline: 0.06,
-        rows: 16,
-        maxW: 0.66,
-        runeColor: "#ffb347",
-      }),
-    ],
-    title: { tr: "Yazıt", en: "Inscription" },
-    body: {
-      tr: "Taşların dizdiği kelime Göktürk harfleriyle “Türk”. Orhun yazıtlarının alfabesi, 8. yüzyıl.",
-      en: "The stones spell “Türk” in Old Turkic letters, the alphabet of the 8th-century Orkhon inscriptions.",
     },
   },
   {
