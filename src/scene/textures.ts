@@ -142,9 +142,13 @@ export function createEnvironment(renderer: THREE.WebGLRenderer) {
 export const HOLES_W = 28;
 export const HOLES_D = 14;
 export const HOLES_Z0 = -8;
+/** the deepest hole the depth map can tell apart, in world units */
+export const HOLES_MAX_DEPTH = 1.5;
 
 /**
  * Where stones have broken out of the ground, seen from above: R = the hole, G = a blur of it that shapes its walls.
+ * A second map, `depthTexture`, keeps the depth of the deepest hole at each point (grey, 1 = HOLES_MAX_DEPTH), so pits
+ * that overlap can open into each other instead of showing each other's walls.
  * Holes are only ever added; `flush` uploads the new ones once a frame.
  */
 export function createHoleMask() {
@@ -154,25 +158,35 @@ export function createHoleMask() {
   c.fillRect(0, 0, cv.width, cv.height);
   c.globalCompositeOperation = 'lighter';
   const tex = new THREE.CanvasTexture(cv);
+  const [dcv, dc] = canvas(cv.width, cv.height);
+  dc.fillStyle = '#000';
+  dc.fillRect(0, 0, dcv.width, dcv.height);
+  /* lighten keeps the greater of what is there and what is drawn: the deepest hole wins */
+  dc.globalCompositeOperation = 'lighten';
+  const depthTex = new THREE.CanvasTexture(dcv);
+  depthTex.minFilter = depthTex.magFilter = THREE.NearestFilter;
+  depthTex.generateMipmaps = false;
   let dirty = false;
-  /** A `w` × `d` hole centred on (x, z), turned by `angle` the way the stone lying in it was. */
-  const add = (x: number, z: number, w: number, d: number, angle: number) => {
-    const draw = (color: string, grow: number) => {
-      c.save();
-      c.translate((x + HOLES_W / 2) * px, (z - HOLES_Z0) * px);
-      c.rotate(-angle);
-      c.fillStyle = color;
-      c.beginPath();
-      c.roundRect((-w / 2) * px - grow, (-d / 2) * px - grow, w * px + grow * 2, d * px + grow * 2, Math.min(w, d) * px * 0.2);
-      c.fill();
-      c.restore();
+  /** A `w` × `d` hole `depth` deep centred on (x, z), turned by `angle` the way the stone lying in it was. */
+  const add = (x: number, z: number, w: number, d: number, angle: number, depth: number) => {
+    const draw = (ctx: CanvasRenderingContext2D, color: string, grow: number, round: boolean) => {
+      ctx.save();
+      ctx.translate((x + HOLES_W / 2) * px, (z - HOLES_Z0) * px);
+      ctx.rotate(-angle);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect((-w / 2) * px - grow, (-d / 2) * px - grow, w * px + grow * 2, d * px + grow * 2, round ? Math.min(w, d) * px * 0.2 : 0);
+      ctx.fill();
+      ctx.restore();
     };
-    draw('#f00', 0);
+    draw(c, '#f00', 0, true);
     c.filter = 'blur(3px)';
-    draw('#0f0', 1);
+    draw(c, '#0f0', 1, true);
     c.filter = 'none';
+    const g = Math.round(Math.min(1, depth / HOLES_MAX_DEPTH) * 255);
+    draw(dc, `rgb(${g},${g},${g})`, 0, false);
     dirty = true;
   };
-  const flush = () => { if (dirty) { tex.needsUpdate = true; dirty = false; } };
-  return { texture: tex, add, flush };
+  const flush = () => { if (dirty) { tex.needsUpdate = depthTex.needsUpdate = true; dirty = false; } };
+  return { texture: tex, depthTexture: depthTex, add, flush };
 }
