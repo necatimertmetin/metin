@@ -43,11 +43,11 @@ const tmpQ = new THREE.Quaternion();
 /**
  * Grow a vine over a `w` × `h` × `d` stone. It either drapes from the top over the front edge and down the face,
  * or creeps across the front and around the sides, following the stone's rounded edges with a slow wander.
- * `g` sets the scale of stem and leaves (the stone grid cell); `drape` forces the kind and `reach` shortens it (0 to 1).
+ * `g` sets the scale of stem and leaves (the stone grid cell).
  */
-export function growVine(w: number, h: number, d: number, g: number, opts: { drape?: boolean; reach?: number } = {}): Vine {
+export function growVine(w: number, h: number, d: number, g: number): Vine {
   const m = Math.min(w, h, d), R = 0.2 * m, lift = m * 0.09 + g * 0.02;
-  const drape = opts.drape ?? Math.random() < 0.6;
+  const drape = Math.random() < 0.6;
   /* the loop's plane: (u, v) are its axes in stone space, `side` the axis the vine wanders along */
   const [A, B, Sd] = drape ? [d / 2, h / 2, w / 2] : [w / 2, d / 2, h / 2];
   const Ru = R + lift;
@@ -55,7 +55,7 @@ export function growVine(w: number, h: number, d: number, g: number, opts: { dra
   const top = 2 * Math.max(0, A - R), side = 2 * Math.max(0, B - R), q = (Math.PI / 2) * Ru;
   /* drape: start on the top towards the back; creep: start on one side towards the back */
   const s0 = drape ? top * rnd(0.1, 0.5) : P - q - side * rnd(0.1, 0.5);
-  const len = (drape ? (top - s0 + q + side * rnd(0.5, 1.15)) : (P - s0 + top + q + side * rnd(0.1, 0.6))) * (opts.reach ?? 1);
+  const len = drape ? (top - s0 + q + side * rnd(0.5, 1.15)) : (P - s0 + top + q + side * rnd(0.1, 0.6));
   const off0 = rnd(-0.6, 0.6) * Math.max(0, Sd - R), amp = Math.min(Sd * 0.3, g * 0.22), f = rnd(1.6, 2.8) / g, ph = rnd(0, 6.28);
 
   const at = (s: number, n: THREE.Vector3) => {

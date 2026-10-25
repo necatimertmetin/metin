@@ -32,43 +32,23 @@ type Frame = {
 
 /**
  * Anything the stones can build: a line or lines of text, an SVG path (an icon, a logo),
- * a free canvas drawing in white, or a group of these laid out together, each with its own place and stone size.
- * Keep a shape in a constant so its stone layout is cached.
+ * or a free canvas drawing in white. Keep a shape in a constant so its stone layout is cached.
  */
 export type Shape = Frame & (
-  | { text: string; font?: string; weight?: number; outline?: number; spacing?: number }
+  | { text: string; font?: string; weight?: number; outline?: number }
   | { path: string; viewBox: [number, number] }
   | { draw: (ctx: CanvasRenderingContext2D, box: Box) => void }
-  | { parts: Shape[] }
-  | { slab: Paint }
 );
-
-/** Paints a slab's inscription in white on a `w` × `h` canvas shaped like the slab's face. */
-export type Paint = (ctx: CanvasRenderingContext2D, w: number, h: number) => void;
 
 /** The area a `draw` shape may use, in canvas pixels, centred on `cx`, `cy`. */
 export type Box = { cx: number; cy: number; w: number; h: number };
 
 const FAMILY = '"Inter Tight","Arial Narrow",sans-serif';
 
-/** Shorthands for the common cases. */
-/**
- * `outline` thickens thin type and `spacing` opens up the letters (both as a share of the font size),
- * so small or thin text still leaves each stroke a stone wide and the letters apart.
- */
-export const stoneText = (text: string, frame: Frame & { font?: string; weight?: number; outline?: number; spacing?: number } = {}): Shape => ({ text, ...frame });
+/** Shorthands for the common cases. `outline` thickens thin type (as a share of the font size) so each stroke is a stone wide. */
+export const stoneText = (text: string, frame: Frame & { font?: string; weight?: number; outline?: number } = {}): Shape => ({ text, ...frame });
 export const stonePath = (path: string, viewBox: [number, number], frame: Frame = {}): Shape => ({ path, viewBox, ...frame });
 export const stoneDraw = (draw: (ctx: CanvasRenderingContext2D, box: Box) => void, frame: Frame = {}): Shape => ({ draw, ...frame });
-/**
- * Several shapes as one: place each with its own `at`, `maxW`, `maxH` and `rows` (so a frame can be cut in big stones
- * and a caption in small ones). The group's `runeColor` lights them all; each part keeps its own `vines`.
- */
-export const stoneGroup = (parts: Shape[], frame: Frame = {}): Shape => ({ parts, ...frame });
-/**
- * One big stone instead of many: a slab filling `maxW` × `maxH` of the view, with whatever `paint` draws cut into
- * its face and lit like the runes. `vines` here is how much ivy hangs over its top edge.
- */
-export const stoneSlab = (paint: Paint, frame: Frame = {}): Shape => ({ slab: paint, ...frame });
 
 /** A jigsaw piece, the mark for browser extensions. */
 export const puzzlePiece = stoneDraw((ctx, { cx, cy, w, h }) => {
@@ -88,7 +68,6 @@ function drawShape(ctx: CanvasRenderingContext2D, sh: Shape, w: number, h: numbe
   ctx.fillStyle = '#fff';
   const [ax, ay] = sh.at ?? [0, 0];
   const box: Box = { cx: w * (0.5 + ax * 0.5), cy: h * (0.46 - ay * 0.5), w: w * (sh.maxW ?? 0.72), h: h * (sh.maxH ?? 0.5) };
-  if ('parts' in sh || 'slab' in sh) return;
   if ('draw' in sh) { sh.draw(ctx, box); return; }
   if ('path' in sh) {
     const [vw, vh] = sh.viewBox, k = Math.min(box.w / vw, box.h / vh);
@@ -101,12 +80,11 @@ function drawShape(ctx: CanvasRenderingContext2D, sh: Shape, w: number, h: numbe
   const lines = sh.text.split('\n'), lh = 0.92, font = (px: number) => `${sh.weight ?? 800} ${px}px ${sh.font ?? FAMILY}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const spaced = (px: number) => { ctx.font = font(px); ctx.letterSpacing = `${(sh.spacing ?? 0) * px}px`; };
   let size = box.h / (0.86 + (lines.length - 1) * lh);
-  spaced(size);
+  ctx.font = font(size);
   const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
   if (widest > box.w) size *= box.w / widest;
-  spaced(size);
+  ctx.font = font(size);
   ctx.strokeStyle = '#fff';
   ctx.lineJoin = 'round';
   ctx.lineWidth = size * (sh.outline ?? 0);
@@ -133,25 +111,6 @@ function stoneSizes(min = 1, max?: number): number[][] {
  * A shape that would need more than `max` stones is cut again in fewer, larger ones.
  */
 export function layStones(shape: Shape, hw: number, hh: number, max: number, rows = shape.rows ?? 12): StoneSpot[] {
-  if ('slab' in shape) {
-    const [ax, ay] = shape.at ?? [0, 0];
-    const w = (shape.maxW ?? 0.72) * 2 * hw, h = (shape.maxH ?? 0.5) * 2 * hh, d = Math.min(w, h) * 0.16, g = Math.min(w, h) / 8;
-    const vines = Array.from({ length: Math.round((shape.vines ?? 0.35) * 6) }, () => growVine(w, h, d, g, { drape: true, reach: 0.3 }));
-    return [{
-      x: ax * hw, y: (0.08 + ay) * hh, z: 0, w, h, d, tilt: 0, glyph: 64,
-      vine: vines.length ? { stem: vines.flatMap((v) => v.stem), leaves: vines.flatMap((v) => v.leaves) } : null,
-    }];
-  }
-  if ('parts' in shape) {
-    /* every part keeps its proportions; if together they need too many stones, all are cut coarser alike */
-    let k = 1, out: StoneSpot[] = [];
-    for (let tries = 0; tries < 5; tries++) {
-      out = shape.parts.flatMap((p) => layStones(p, hw, hh, Infinity, Math.max(1, Math.round((p.rows ?? 12) * k))));
-      if (out.length <= max) break;
-      k *= Math.sqrt(max / out.length) * 0.95;
-    }
-    return out.slice(0, max).sort((a, b) => a.x - b.x);
-  }
   const w = 900, h = Math.round((900 * hh) / hw);
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;

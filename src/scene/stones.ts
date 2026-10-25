@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { groundHeight } from './ground';
 import type { StoneSpot } from './shapes';
 
-/** `phys`: moved by the physics engine (see physics.ts), not by this field */
-export type Mode = 'emerge' | 'lift' | 'go' | 'home' | 'fall' | 'rest' | 'away' | 'phys';
+/** `phys`: moved by the physics engine (see physics.ts); `script`: moved by the scene itself (the opening stone's strike) */
+export type Mode = 'emerge' | 'lift' | 'go' | 'home' | 'fall' | 'rest' | 'away' | 'phys' | 'script';
 
 export type Stone = {
   p: THREE.Vector3; v: THREE.Vector3;
@@ -17,6 +17,8 @@ export type Stone = {
   /** how much it still lies in the ground, 1 to 0: while 1 it looks like the ground itself */
   bury: number;
   spot: StoneSpot | null;
+  /** the size the stone has now: it eases to its spot's size while it travels, so a new shape never makes stones jump */
+  size: THREE.Vector3;
   mode: Mode;
   t: number; lt: number; delay: number;
   alive: number;
@@ -34,12 +36,12 @@ const tmpQ = new THREE.Quaternion();
 const tmpV = new THREE.Vector3();
 const UP = new THREE.Vector3();
 
-/** Half extents along world x and y of a stone's box turned by `q`. */
-function extents(q: THREE.Quaternion, sp: StoneSpot): [number, number] {
+/** Half extents along world x and y of a box of `size` turned by `q`. */
+function extents(q: THREE.Quaternion, size: THREE.Vector3): [number, number] {
   const e = tmpM.makeRotationFromQuaternion(q).elements;
   return [
-    0.5 * (Math.abs(e[0]) * sp.w + Math.abs(e[4]) * sp.h + Math.abs(e[8]) * sp.d),
-    0.5 * (Math.abs(e[1]) * sp.w + Math.abs(e[5]) * sp.h + Math.abs(e[9]) * sp.d),
+    0.5 * (Math.abs(e[0]) * size.x + Math.abs(e[4]) * size.y + Math.abs(e[8]) * size.z),
+    0.5 * (Math.abs(e[1]) * size.x + Math.abs(e[5]) * size.y + Math.abs(e[9]) * size.z),
   ];
 }
 
@@ -54,7 +56,7 @@ function restPose(q: THREE.Quaternion) {
 }
 
 function newStone(x: number, y: number, z: number): Stone {
-  return { p: new THREE.Vector3(x, y, z), v: new THREE.Vector3(), r: new THREE.Euler(), w: new THREE.Vector3(), q: new THREE.Quaternion(), restY: 0, slow: false, bury: 0, spot: null, mode: 'go', t: 0, lt: 0, delay: 0, alive: 1, seed: Math.random() };
+  return { p: new THREE.Vector3(x, y, z), v: new THREE.Vector3(), r: new THREE.Euler(), w: new THREE.Vector3(), q: new THREE.Quaternion(), restY: 0, slow: false, bury: 0, spot: null, size: new THREE.Vector3(), mode: 'go', t: 0, lt: 0, delay: 0, alive: 1, seed: Math.random() };
 }
 
 /**
@@ -106,7 +108,8 @@ export class StoneField {
 
   /**
    * Send the stones to a new set of spots, adding or retiring stones as needed. `intro` is the opening:
-   * every stone starts in the rock and they break free over about ten seconds. Stones added later also come out of it.
+   * every new stone starts in the rock and they break free over about ten seconds (a stone already out, like the one
+   * struck to begin, just flies to its spot). Stones added later also come out of the rock, quickly.
    */
   assign(spots: StoneSpot[], intro: boolean) {
     const { hw } = this;
@@ -127,9 +130,11 @@ export class StoneField {
       if (skip.has(i) || ti >= spots.length) { s.mode = 'away'; s.t = 0; s.w.set(rnd(3), rnd(3), rnd(3)); return; }
       const spot = spots[ti++];
       s.spot = spot;
+      /* a stone new to the field takes its spot's size at once; one already in flight grows into it on the way */
+      if (fresh.has(s) || s.size.x === 0) s.size.set(spot.w, spot.h, spot.d);
       if (this.reduced) { s.p.set(spot.x, spot.y, spot.z); s.r.set(0, 0, 0); s.mode = 'home'; return; }
       /* the opening: from the middle outwards, a stone breaks away every moment for about seven seconds */
-      if (intro) { this.bury(s, Math.abs(spot.x / hw) * 5.5 + Math.random() * 1.8, 2 + Math.random() * 0.8); return; }
+      if (intro && fresh.has(s)) { this.bury(s, Math.abs(spot.x / hw) * 5.5 + Math.random() * 1.8, 2 + Math.random() * 0.8); return; }
       if (fresh.has(s)) { this.bury(s, Math.random() * 0.4, 0.7); return; }
       /* still coming out of the rock: keep coming, it just flies to the new spot */
       if (s.mode === 'emerge') return;
@@ -139,6 +144,18 @@ export class StoneField {
       s.delay = (spot.x / hw * 0.5 + 0.5) * 0.5 + Math.random() * 0.2;
       s.slow = false;
       s.w.set(rnd(2.2), rnd(2.2), rnd(1.2));
+    });
+  }
+
+  /** Put stones straight into their spots, hovering there, with nothing coming or going (the opening's lone stone). */
+  placeAt(spots: StoneSpot[]) {
+    this.stones = spots.map((sp) => {
+      const s = newStone(sp.x, sp.y, sp.z);
+      s.spot = sp;
+      s.size.set(sp.w, sp.h, sp.d);
+      s.r.set(0, 0, sp.tilt);
+      s.mode = 'home';
+      return s;
     });
   }
 
@@ -171,7 +188,8 @@ export class StoneField {
     const target = new THREE.Vector3();
     for (const s of this.stones) {
       const spot = s.spot;
-      if ((!spot && s.mode !== 'away') || s.mode === 'phys') continue;
+      if ((!spot && s.mode !== 'away') || s.mode === 'phys' || s.mode === 'script') continue;
+      if (spot && s.mode !== 'away') s.size.lerp(tmpV.set(spot.w, spot.h, spot.d), 1 - Math.exp(-2.4 * dt));
       s.t += dt;
       if (s.mode === 'emerge' && spot) {
         /* lies in the rock, then trembles, cracks free and rises out of it, turning slowly upright */
@@ -180,7 +198,6 @@ export class StoneField {
           const k = u / 0.8;
           s.p.y = s.restY + Math.sin(u * 95) * 0.008 * k;
           s.r.x = -Math.PI / 2 + Math.sin(u * 70) * 0.025 * k;
-          if (u - dt <= 0) this.shake = Math.min(0.06, this.shake + 0.006);
         } else if (u >= 0.8) {
           if (u - dt < 0.8) this.onBreak?.(s.p.x, s.restY, s.p.z, spot.w, spot.h, spot.d, s.r.z);
           const k = Math.min(1, (u - 0.8) / s.lt), e = k * k * (3 - 2 * k);
@@ -195,7 +212,7 @@ export class StoneField {
         s.alive = Math.max(0, 1 - s.t / 1.2);
       } else if (s.mode === 'fall' && spot) {
         s.v.y -= 32 * dt;
-        const [, ey] = extents(tmpQ.setFromEuler(s.r), spot);
+        const [, ey] = extents(tmpQ.setFromEuler(s.r), s.size);
         /* every stone comes down on the ground where it falls; none stacks on another */
         const floorY = this.floorAt(s.p.x, s.p.z);
         if (s.p.y - ey <= floorY && s.v.y < 0) {
@@ -205,7 +222,7 @@ export class StoneField {
           else {
             /* and tips over onto whichever face is nearest the ground, right there */
             restPose(s.q.setFromEuler(s.r));
-            s.restY = floorY + extents(s.q, spot)[1];
+            s.restY = floorY + extents(s.q, s.size)[1];
             s.mode = 'rest'; s.v.set(0, 0, 0); s.w.set(0, 0, 0);
           }
         }
@@ -239,7 +256,7 @@ export class StoneField {
           s.w.x += ((tx - s.r.x) * K - s.w.x * C) * dt;
           s.w.y += ((ty - s.r.y) * K - s.w.y * C) * dt;
           s.w.z += ((tz - s.r.z) * K - s.w.z * C) * dt;
-          if (s.mode === 'go' && s.p.distanceTo(target) < 0.03 && s.v.length() < 0.3) { s.mode = 'home'; s.slow = false; this.onHome?.(s.p.x); this.shake = Math.min(0.08, this.shake + 0.004); }
+          if (s.mode === 'go' && s.p.distanceTo(target) < 0.03 && s.v.length() < 0.3) { s.mode = 'home'; s.slow = false; this.onHome?.(s.p.x); }
         }
       }
       if (s.mode !== 'rest') {
