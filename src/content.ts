@@ -1,5 +1,5 @@
 import { puzzlePiece, stoneText, type Shape } from './scene/shapes';
-import { cursorArrow, envelope, gitBranch, mountains, reactAtom, stele, stoneCard, stoneTablet, tsBadge } from './scene/marks';
+import { cursorArrow, envelope, gitBranch, mountains, reactAtom, stele, tsBadge } from './scene/marks';
 import { RUNE_FONT } from './scene/textures';
 
 export type Lang = 'tr' | 'en';
@@ -15,11 +15,7 @@ export type Scene = {
 /** The story, one scene per scroll step. */
 export const SCENES: Scene[] = [
   {
-    /* first "Metin" in Orkhon letters (m, t, i, n; right to left, the e unwritten as in the inscriptions), then in Latin */
-    shapes: [
-      stoneText('\u{10C22}\u{10C45}\u{10C03}\u{10C24}', { font: RUNE_FONT, weight: 400, outline: 0.06, rows: 16, maxW: 0.66, maxH: 0.5 }),
-      stoneText('METİN', { rows: 14, maxW: 0.8, maxH: 0.46 }),
-    ],
+    shapes: [stoneText('METİN', { rows: 14, maxW: 0.8, maxH: 0.46 })],
     title: { tr: 'Metin', en: 'Metin' },
     body: {
       tr: 'Hem yazı, hem taş. Bilinen ilk Türkçe metinlerden bazıları taşa kazındı. Mert Metin, frontend geliştirici.',
@@ -27,20 +23,6 @@ export const SCENES: Scene[] = [
     },
   },
   /* ---- trial scenes: try-outs of the stone shapes, to pick from ---- */
-  {
-    shapes: [stoneTablet({
-      title: 'MERT METİN',
-      lines: ['Frontend developer', 'React · TypeScript · WebGL · Chrome MV3', 'necatimertmetin@gmail.com'],
-      runeColor: '#ffd27a',
-    })],
-    title: { tr: 'Yazıt kartı', en: 'Inscribed card' },
-    body: { tr: 'Tek parça taş, yüzüne kazınmış bir kartvizit.', en: 'One slab of stone, a business card cut into its face.' },
-  },
-  {
-    shapes: [stoneCard({ title: 'MERT METİN', role: 'FRONTEND', tags: ['REACT', 'TS', 'WEBGL'], runeColor: '#ffd27a' })],
-    title: { tr: 'Kartvizit', en: 'Card' },
-    body: { tr: 'Taştan bir kartvizit.', en: 'A business card, in stone.' },
-  },
   {
     /* "Türk" in Orkhon letters, which run right to left */
     shapes: [stoneText('\u{10C45}\u{10C07}\u{10C3C}\u{10C1A}', { font: RUNE_FONT, weight: 400, outline: 0.06, rows: 16, maxW: 0.66, runeColor: '#ffb347' })],
@@ -118,6 +100,7 @@ export const UI: Record<string, Text> = {
   scenes: { tr: 'Sahneler', en: 'Scenes' },
   scene: { tr: 'Sahne', en: 'Scene' },
   language: { tr: 'Dil', en: 'Language' },
+  sound: { tr: 'Ses', en: 'Sound' },
 };
 
 export const CONTACT = {

@@ -58,7 +58,7 @@ float nA = fbm3(w * 1.4);
 float crack = (1. - smoothstep(.0, .05, abs(n3(w * 1.9) - .5))) * smoothstep(.45, .7, n3(w * .7 + 3.));
 crack = max(crack, (1. - smoothstep(.0, .04, abs(n3(w * 3.2 + 9.) - .5))) * smoothstep(.55, .8, n3(w * 1.3 + 5.)) * .7);
 /* a slab (glyph 64) is one big face, so keep its cracks sparse or they crowd the inscription */
-crack *= 1. - step(63.5, vMisc.x) * .8;
+crack *= (1. - step(63.5, vMisc.x) * .8) * (1. - vHome.z);
 float pits = smoothstep(.6, .85, fbm3(w * 3.5));
 vec3 stoneC = mix(vec3(.085, .077, .066), vec3(.145, .13, .112), smoothstep(.2, .8, fbm3(w * .4)));
 stoneC *= (.84 + .32 * nA) * (1. - .3 * pits) * (1. - .6 * crack);
@@ -73,13 +73,16 @@ float side = min(vSize.x, vSize.y) * .76;
 vec2 guv = vLocal.xy * vSize.xy / side + .5;
 float inG = step(0., guv.x) * step(guv.x, 1.) * step(0., guv.y) * step(guv.y, 1.) * step(.47, vLocal.z) * (1. - slab);
 vec2 cellXY = vec2(mod(vMisc.x, 8.), floor(vMisc.x / 8.));
-vec4 rt = texture2D(uRunes, vec2((cellXY.x + guv.x) / 8., (7. - cellXY.y + guv.y) / 8.)) * inG
-        + texture2D(uInscription, vLocal.xy + .5) * step(.47, vLocal.z) * slab;
+/* vHome.z: how much the stone still lies in the ground, where it shows no rune */
+vec4 rt = (1. - vHome.z) * (texture2D(uRunes, vec2((cellXY.x + guv.x) / 8., (7. - cellXY.y + guv.y) / 8.)) * inG
+        + texture2D(uInscription, vLocal.xy + .5) * step(.47, vLocal.z) * slab);
 float rune = rt.r;
 /* the cut: sloped walls from the B profile, a floor in shade; the light comes from its bottom (see the emissive part) */
 float carve = rt.b;
 float core = rune * smoothstep(.3, .75, carve);
 diffuseColor.rgb = stoneC * (1. - carve * .5);
+/* still in the ground, the stone wears the ground's own surface, so it can't be told apart until it breaks free */
+if (vHome.z > 0.) { float bc, bm, bf; diffuseColor.rgb = mix(diffuseColor.rgb, groundAlbedo(vWPos, bc, bm, bf), vHome.z); }
 `;
 
 /** Fine relief from cracks, pits and the rune, applied with screen-space derivatives. */
@@ -103,7 +106,7 @@ export const STONE_EMISSIVE = /* glsl */ `
 vec3 wn = normalize((vec4(normal, 0.) * viewMatrix).xyz);
 float moss = smoothstep(.15, .75, wn.y) * smoothstep(.42, .66, fbm3(w * 1.8 + 5.));
 moss = max(moss, crack * smoothstep(.4, .7, fbm3(w * 2.6)) * .9);
-moss = clamp(moss * (1. - max(inG, slab * step(.02, rt.g)) * .7), 0., 1.);
+moss = clamp(moss * (1. - max(inG, slab * step(.02, rt.g)) * .7), 0., 1.) * (1. - vHome.z);
 vec3 mossC = mix(vec3(.06, .10, .025), vec3(.16, .24, .06), fbm3(w * 5.));
 diffuseColor.rgb = mix(diffuseColor.rgb, mossC, moss);
 roughnessFactor = mix(roughnessFactor, .72, moss);
@@ -116,4 +119,57 @@ float idle = smoothstep(.93, 1., sin(uTime * .7 + vMisc.y * 40.)) * .7;
 float glow = clamp(near * 1.9 + sweep * 1.4 + idle, 0., 1.9) * (.85 + .15 * sin(uTime * 9. + vMisc.y * 20.));
 /* runes smoulder from the bottom of the cut; the pointer, the sweep and the idle flicker light them up fully */
 totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - moss * .6)) * glow + core * .65 + rt.g * .03 + crack * .03);
+`;
+
+/**
+ * The ground rock's colour at world point `p`, with how much crack, moss and fine detail is there.
+ * Shared by the ground and by stones still lying in it, so the two match exactly.
+ */
+export const GROUND_FN = /* glsl */ `
+vec3 groundAlbedo(vec3 p, out float gcrack, out float gmoss, out float gfine) {
+  vec3 gw = p * 1.1;
+  float gn = fbm3(gw * .3);
+  gcrack = (1. - smoothstep(.0, .035, abs(n3(gw * .8) - .5))) * smoothstep(.45, .7, n3(gw * .25 + 3.));
+  gcrack = max(gcrack, (1. - smoothstep(.0, .03, abs(n3(gw * 2.1 + 9.) - .5))) * smoothstep(.55, .8, n3(gw * .6 + 5.)) * .6);
+  gfine = 1. - smoothstep(.3, .9, length(fwidth(gw)) * 7.);
+  /* darker than the stones: the ground faces the sun square on, the stones' faces only at a slant */
+  vec3 groundC = mix(vec3(.016, .0145, .013), vec3(.038, .034, .029), smoothstep(.2, .8, gn));
+  /* a crisp network of joints between the rock's slabs, antialiased so it stays sharp at a slant */
+  float gjw = fwidth(n3(gw * 1.6 + 2.)) * 1.5;
+  float gjoint = 1. - smoothstep(.004, .012 + gjw, abs(n3(gw * 1.6 + 2.) - .5));
+  gcrack = max(gcrack, gjoint * .45 * smoothstep(.35, .65, n3(gw * .5 + 8.)));
+  groundC *= (.85 + .3 * fbm3(gw * 1.4)) * (1. + (n3(gw * 22.) - .5) * .35 * gfine) * (1. - .6 * gcrack);
+  gmoss = smoothstep(.56, .76, fbm3(gw * .5 + 5.)) * (1. - gcrack * .5);
+  groundC = mix(groundC, mix(vec3(.018, .03, .009), vec3(.04, .065, .018), fbm3(gw * 4.)), gmoss * .8);
+  /* the rock is an island of stone under the shapes; away from them it sinks into the dark */
+  groundC *= smoothstep(14., 2., length(p.xz - vec2(0., -2.)));
+  return groundC;
+}
+`;
+
+/** The ground rock: the shared albedo, then the holes stones left, cut right through it. */
+export const GROUND_COLOR = /* glsl */ `
+vec3 gw = vGPos * 1.1;
+float gcrack, gmoss, gfine;
+vec3 groundC = groundAlbedo(vGPos, gcrack, gmoss, gfine);
+/* holes left where stones broke out: dark inside, shaded down their walls */
+vec4 gh = texture2D(uHoles, vec2((vGPos.x + uHolesRect.x) / uHolesRect.z, 1. - (vGPos.z - uHolesRect.y) / uHolesRect.w));
+/* inside a hole there is no ground at all: the pit below shows through */
+if (gh.r > .5) discard;
+groundC *= 1. - gh.g * .45;
+diffuseColor.rgb = groundC;
+`;
+
+/** The ground's fine relief, from its cracks and grain, with the same safeguards as the stones'. */
+export const GROUND_RELIEF = /* glsl */ `
+float gBh = -gcrack * .9 + (fbm3(gw * 3.) - .5) * .5 + ((fbm3(gw * 9.) - .5) * .7 + (n3(gw * 28.) - .5) * .35) * gfine - gh.g * 2.5;
+vec3 gVp = -vViewPosition; vec3 gDpx = dFdx(gVp); vec3 gDpy = dFdy(gVp);
+float gDhx = dFdx(gBh); float gDhy = dFdy(gBh);
+vec3 gR1 = cross(gDpy, normal); vec3 gR2 = cross(normal, gDpx);
+float gDet = dot(gDpx, gR1);
+vec3 gGrad = sign(gDet) * (gDhx * gR1 + gDhy * gR2) * .018;
+float gLim = abs(gDet) * .7, gLen = length(gGrad);
+if (gLen > gLim) gGrad *= gLim / gLen;
+vec3 gN = normalize(abs(gDet) * normal - gGrad);
+if (dot(gN, normalize(vViewPosition)) > .05) normal = gN;
 `;
