@@ -37,8 +37,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .shell:not(.on) .ui { opacity: 0; pointer-events: none; transition: none; }
 
 /* the opening stone is drawn in the scene; this is the button over it, and its line of text beneath */
-.gate { position: fixed; left: 50%; top: 46%; width: 15vh; height: 16vh; transform: translate(-50%, -50%); z-index: 6; border-radius: 22px; cursor: pointer; }
-.gate-hint { position: fixed; left: 50%; top: calc(46% + 12vh); transform: translateX(-50%); z-index: 6; text-align: center; white-space: nowrap; pointer-events: none; color: var(--muted); transition: opacity 0.8s; }
+.gate { position: fixed; left: 50%; top: 46%; width: 21vh; height: 22vh; transform: translate(-50%, -50%); z-index: 6; border-radius: 22px; cursor: pointer; }
+.gate-hint { position: fixed; left: 50%; top: calc(46% + 15vh); transform: translateX(-50%); z-index: 6; text-align: center; white-space: nowrap; pointer-events: none; color: var(--muted); transition: opacity 0.8s; }
 .gate-hint b { display: block; color: var(--fg); font-family: var(--mono); font-weight: 500; font-size: 13px; letter-spacing: 0.45em; margin-bottom: 8px; padding-left: 0.45em; }
 .gate.gone, .gate-hint.gone { opacity: 0; pointer-events: none; }
 .tl { top: max(20px, env(safe-area-inset-top)); left: max(22px, env(safe-area-inset-left)); }
@@ -104,3 +104,90 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 /* the panel's words are cut into a tablet in the project's wall; the panel itself stays, unseen, for screen readers and the keyboard */
 .panel.in-stone { width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); animation: none; }
+
+/*
+ * Stone controls (trying them out on the top right and the scene pebbles): small stones cut from the walls' own rock,
+ * edges worn uneven, what is on them cut in and lit with the rune light when chosen. Under the pointer a stone lifts;
+ * pressed, it gives.
+ */
+.stone-btn {
+  position: relative; display: grid; place-items: center; width: 38px; height: 36px; padding: 0; border: 0;
+  border-radius: 47% 53% 55% 45% / 52% 44% 56% 48%;
+  background: radial-gradient(120% 90% at 30% 22%, rgba(255, 255, 255, 0.11), transparent 55%), url(/ui/stone.jpg) center / 150px;
+  box-shadow: inset 2px 2px 2px rgba(255, 255, 255, 0.1), inset -3px -4px 7px rgba(0, 0, 0, 0.7), 0 4px 9px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.55);
+  color: #57534d;
+  transition: transform 0.2s, box-shadow 0.25s, color 0.25s;
+}
+.stone-btn:hover { transform: translateY(-2px); color: #8fcfc8; box-shadow: inset 2px 2px 2px rgba(255, 255, 255, 0.12), inset -3px -4px 7px rgba(0, 0, 0, 0.7), 0 7px 12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 16px rgba(63, 224, 208, 0.18); }
+.stone-btn:active { transform: translateY(1px) scale(0.96); box-shadow: inset 3px 4px 8px rgba(0, 0, 0, 0.8), 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.55); }
+.stone-btn[aria-pressed='true'] { color: var(--rune); }
+/* what is on a stone is cut into it: dark above its edges, a glint below; lit, it glows from inside the cut */
+.stone-btn svg { width: 17px; height: 17px; filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.9)) drop-shadow(0 1px 0 rgba(255, 255, 255, 0.07)); }
+.stone-btn[aria-pressed='true'] svg { filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.9)) drop-shadow(0 0 5px rgba(63, 224, 208, 0.7)); }
+.stone-txt { font-family: 'Cinzel', serif; font-weight: 900; font-size: 12px; letter-spacing: 0.04em; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.07); }
+.stone-txt[aria-pressed='true'] { text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 0 8px rgba(63, 224, 208, 0.75), 0 0 2px rgba(63, 224, 208, 0.9); }
+.sound.stone-btn { width: 38px; height: 36px; border-radius: 52% 48% 44% 56% / 47% 55% 45% 53%; }
+.langs { gap: 6px; }
+.langs .stone-btn { padding: 0; border: 0; }
+.langs .stone-btn:last-child { border-radius: 55% 45% 50% 50% / 45% 52% 48% 55%; }
+
+/* the volume: a groove cut in the stone, an ember sliding in it */
+.vol::-webkit-slider-runnable-track { height: 6px; border-radius: 4px; background: #0a0a0a; box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.95), 0 1px 0 rgba(255, 255, 255, 0.07); }
+.vol::-moz-range-track { height: 6px; border-radius: 4px; background: #0a0a0a; box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.95), 0 1px 0 rgba(255, 255, 255, 0.07); }
+.vol::-webkit-slider-thumb { width: 14px; height: 14px; margin-top: -4px; background: radial-gradient(circle at 40% 35%, #effffd, var(--rune) 45%, #0b5d55); box-shadow: 0 0 10px var(--rune), 0 0 3px #fff; }
+.vol::-moz-range-thumb { width: 14px; height: 14px; background: radial-gradient(circle at 40% 35%, #effffd, var(--rune) 45%, #0b5d55); box-shadow: 0 0 10px var(--rune), 0 0 3px #fff; }
+
+/* the scenes: a column of pebbles; the current one bigger, a rune lit on it; a pebble's name cut in beside it on hover */
+.cr { gap: 10px; justify-items: center; }
+.cr button {
+  position: relative; width: 19px; height: 16px; border: 0; opacity: 1;
+  background: radial-gradient(120% 90% at 30% 22%, rgba(255, 255, 255, 0.16), transparent 60%), url(/ui/stone.jpg) center / 60px;
+  box-shadow: inset 1px 1px 1px rgba(255, 255, 255, 0.12), inset -2px -2px 3px rgba(0, 0, 0, 0.7), 0 2px 4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.5);
+  transition: width 0.3s, height 0.3s, box-shadow 0.3s, transform 0.2s;
+}
+.cr button:hover { transform: translateX(-2px); }
+.cr button[aria-current='true'] { width: 26px; height: 23px; transform: none; background: radial-gradient(120% 90% at 30% 22%, rgba(255, 255, 255, 0.16), transparent 60%), url(/ui/stone.jpg) center / 70px; box-shadow: inset 1px 1px 1px rgba(255, 255, 255, 0.14), inset -2px -3px 4px rgba(0, 0, 0, 0.7), 0 3px 6px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 12px rgba(63, 224, 208, 0.22); }
+.cr button[aria-current='true']::after {
+  content: attr(data-rune); position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: 'Noto Sans Old Turkic', sans-serif; font-size: 13px; line-height: 1; color: var(--rune);
+  text-shadow: 0 0 5px var(--rune), 0 -1px 0 rgba(0, 0, 0, 0.8);
+}
+.cr button::before {
+  content: attr(data-name); position: absolute; right: calc(100% + 14px); top: 50%; transform: translate(6px, -50%);
+  white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.25s, transform 0.25s;
+  font-family: 'Cinzel', serif; font-weight: 900; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: #cfcac2; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.9), 0 0 14px rgba(63, 224, 208, 0.25);
+}
+.cr button:hover::before, .cr button:focus-visible::before { opacity: 1; transform: translate(0, -50%); }
+
+/*
+ * The rest of the interface in the same stone: words cut into it (dark above their edges, a glint below), in Cinzel;
+ * the scene's caption on a slab of the rock; the links small stones.
+ */
+.slab {
+  padding: 16px 20px 18px;
+  border-radius: 10px 15px 12px 17px / 15px 10px 17px 12px;
+  background: radial-gradient(140% 100% at 18% 0%, rgba(255, 255, 255, 0.06), transparent 60%), url(/ui/stone.jpg) center / 230px;
+  box-shadow: inset 2px 2px 3px rgba(255, 255, 255, 0.07), inset -4px -6px 11px rgba(0, 0, 0, 0.65), 0 8px 18px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.55);
+}
+.mark { position: relative; font-family: 'Cinzel', serif; font-weight: 900; font-size: 19px; letter-spacing: 0.06em; text-transform: none; color: #ddd7cd; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 12px rgba(0, 0, 0, 0.7); }
+.mark-latin, .mark-rune { transition: opacity 0.5s; }
+.mark-rune { position: absolute; left: 0; top: 1px; font-family: 'Noto Sans Old Turkic', sans-serif; font-weight: 400; font-size: 17px; letter-spacing: 0.14em; color: var(--rune); text-shadow: 0 0 8px rgba(63, 224, 208, 0.6); opacity: 0; white-space: nowrap; }
+.mark:hover .mark-latin { opacity: 0; }
+.mark:hover .mark-rune { opacity: 1; }
+.mark small { display: block; margin-top: 7px; font-family: 'Cinzel', serif; font-weight: 700; font-size: 9.5px; letter-spacing: 0.26em; text-transform: uppercase; color: #8e8b85; }
+.cap .idx { font-family: 'Cinzel', serif; font-weight: 700; font-size: 11px; letter-spacing: 0.24em; color: var(--rune); opacity: 0.85; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 0 6px rgba(63, 224, 208, 0.45); }
+.cap b { font-family: 'Cinzel', serif; font-weight: 900; font-size: 25px; letter-spacing: 0.03em; color: #e6e0d6; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 14px rgba(63, 224, 208, 0.16); }
+.cap span { font-family: 'Cinzel', serif; font-weight: 700; font-size: 13.5px; letter-spacing: 0.03em; line-height: 1.65; color: #c3bdb3; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.05); }
+.bc { font-family: 'Cinzel', serif; font-weight: 700; font-size: 10.5px; letter-spacing: 0.24em; text-transform: uppercase; color: #79756e; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.05); }
+.mail { font-family: 'Cinzel', serif; font-weight: 700; font-size: 12.5px; letter-spacing: 0.08em; color: #d4cec4; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.06); transition: color 0.25s, text-shadow 0.25s; }
+.mail:hover { text-decoration: none; color: var(--rune); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 0 8px rgba(63, 224, 208, 0.6); }
+.soc { gap: 8px; }
+.soc a.stone-btn { width: 34px; height: 32px; color: #6d6862; }
+.soc a.stone-btn:nth-child(2) { border-radius: 55% 45% 50% 50% / 45% 52% 48% 55%; }
+.soc a.stone-btn:hover { color: var(--rune); }
+.soc a.stone-btn svg { width: 16px; height: 16px; }
+.soc a.stone-btn:hover svg { filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.9)) drop-shadow(0 0 5px rgba(63, 224, 208, 0.7)); }
+.gate-hint b { font-family: 'Cinzel', serif; font-weight: 900; font-size: 15px; letter-spacing: 0.5em; color: #e8e2d8; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 0 10px rgba(63, 224, 208, 0.35); }
+.gate-hint span { font-family: 'Cinzel', serif; font-weight: 700; font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; color: #8e8b85; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9); }
+
