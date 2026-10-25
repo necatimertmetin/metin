@@ -29,4 +29,5 @@ npm run preview  # serve the build
 | `src/scene/sky.ts` | the night sky, the Milky Way and the rune constellations |
 | `src/scene/sound.ts` | all sound, synthesised with Web Audio |
 
-`public/og.jpg` is the link preview image; once the site has its address, make `og:image` in `index.html` a full URL.
+Live at **https://necatimertmetin.github.io/metin/**. `npm run deploy` builds the site and publishes it to the `gh-pages` branch
+(GitHub Pages serves that branch). `public/og.jpg` is the link preview image.

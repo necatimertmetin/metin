@@ -93,6 +93,7 @@ export const UI: Record<string, Text> = {
   scene: { tr: "Sahne", en: "Scene" },
   language: { tr: "Dil", en: "Language" },
   sound: { tr: "Ses", en: "Sound" },
+  volume: { tr: "Ses seviyesi", en: "Volume" },
   begin: { tr: "BAŞLA", en: "BEGIN" },
   beginNote: { tr: "Sesli bir deneyim · taşa dokun", en: "An experience with sound · touch the stone" },
 };
