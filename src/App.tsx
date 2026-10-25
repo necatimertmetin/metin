@@ -3,6 +3,7 @@ import { RuinsScene } from './scene/RuinsScene';
 import { CONTACT, SCENES, UI, initialLang, type Lang } from './content';
 import { GitHubIcon, LinkedInIcon, SoundIcon } from './ui/icons';
 import { sound } from './scene/sound';
+import { Cursor } from './ui/Cursor';
 
 export default function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -38,6 +39,7 @@ export default function App() {
   return (
     <>
       <canvas ref={canvas} className="stage" aria-hidden="true" />
+      <Cursor />
       {noGL && <div className="fallback" aria-hidden="true">{scene.shapes.flatMap((s) => ('text' in s ? [s.text] : [])).pop() ?? scene.title[lang]}</div>}
 
       <main className="sr-only">

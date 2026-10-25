@@ -21,6 +21,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 .stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
 .stage.held { cursor: grabbing; }
+/* with a mouse, a glowing rune stands in for the cursor over the scene (see Cursor.tsx) */
+@media (pointer: fine) { .stage, .stage.held { cursor: none; } }
+.cursor { position: fixed; left: 0; top: 0; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+.cursor.on { opacity: 1; }
+.cursor span { display: block; transform: translate(-50%, -50%) rotate(-15deg); font-family: 'Noto Sans Old Turkic', sans-serif; font-size: 26px; line-height: 1; color: var(--rune); text-shadow: 0 0 6px var(--rune), 0 0 16px rgba(63, 224, 208, 0.45); transition: transform 0.15s, filter 0.15s; }
+.cursor.down span { transform: translate(-50%, -50%) rotate(-15deg) scale(0.8); filter: brightness(1.6); animation: cursor-turn 3.2s linear 0.3s infinite; }
+@keyframes cursor-turn { to { transform: translate(-50%, -50%) rotate(345deg) scale(0.8); } }
+@media (prefers-reduced-motion: reduce) { .cursor.down span { animation: none; } }
 .fallback { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; font-family: var(--display); font-weight: 800; font-size: clamp(3rem, 14vw, 12rem); line-height: 0.86; letter-spacing: -0.05em; padding: 24px; }
 
 .ui { position: fixed; z-index: 5; }

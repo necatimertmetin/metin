@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { GROUND_COLOR, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
+import { GROUND_COLOR, GROUND_EMISSIVE, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
 import { createGroundGeometry } from './ground';
+import { createSky } from './sky';
 import { GLYPHS, HOLES_D, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createInscription, createLeafTexture, createRuneAtlas } from './textures';
 import { layStones, type Shape, type StoneSpot } from './shapes';
 import { StoneField, type Pointer } from './stones';
 import { sound } from './sound';
+import type { StonePhysics } from './physics';
 
 const MAX_STONES = 1200;
 const MAX_LEAVES = 6000;
@@ -36,6 +38,7 @@ export class RuinsScene {
   private readonly stemMesh: THREE.InstancedMesh;
   private readonly pitMesh: THREE.InstancedMesh;
   private readonly floor: THREE.Mesh;
+  private readonly sky: ReturnType<typeof createSky>;
   private readonly lamp = new THREE.PointLight(0x40e0d0, 0, 4.5, 2);
   private readonly aSize: THREE.InstancedBufferAttribute;
   private readonly aHome: THREE.InstancedBufferAttribute;
@@ -70,6 +73,8 @@ export class RuinsScene {
   private held = false;
   /** the opening is over: every stone has come out of the ground and reached its place once; only then can they be dropped */
   private introDone = false;
+  /** the rigid-body physics for dropped stones, once its engine has loaded; until then (or if it can't) they fall the simple way */
+  private physics: StonePhysics | null = null;
   private raf = 0;
   private last = 0;
   private pointer: Pointer = { has: false, x: 0, y: 0 };
@@ -125,19 +130,27 @@ export class RuinsScene {
     const groundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, envMapIntensity: 0.12 });
     groundMat.onBeforeCompile = (sh) => {
       sh.uniforms.uHoles = { value: this.holes.texture };
+      sh.uniforms.uRunes = this.uni.uRunes;
+      sh.uniforms.uRune = this.uni.uRune;
       sh.uniforms.uHolesRect = { value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D) };
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vGPos;')
         .replace('#include <project_vertex>', '#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${NOISE3}\n${GROUND_FN}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect;`)
+        .replace('#include <common>', `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune;\n${GROUND_FN}`)
         .replace('#include <color_fragment>', `#include <color_fragment>\n${GROUND_COLOR}`)
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(.92, .8, gmoss);')
-        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${GROUND_RELIEF}`);
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(.88, .72, gmoss) + gcrack * .08;')
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${GROUND_RELIEF}`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GROUND_EMISSIVE}`);
     };
     this.floor = new THREE.Mesh(createGroundGeometry(), groundMat);
     this.floor.receiveShadow = true;
     scene.add(this.floor);
+
+    /* the night sky over it all */
+    this.sky = createSky(this.uni.uRune);
+    scene.add(this.sky.group);
+
 
     /* stones: one subdivided cube, shaped per instance in the vertex shader */
     const geo = new THREE.BoxGeometry(1, 1, 1, 10, 10, 10);
@@ -156,9 +169,9 @@ export class RuinsScene {
         .replace('#include <begin_vertex>', 'vec3 transformed = sp0;\nvLocal = position; vSize = aSize; vMisc = aMisc; vHome = aHome;')
         .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${NOISE3}\n${GROUND_FN}
+        .replace('#include <common>', `#include <common>\n${NOISE3}
           uniform sampler2D uRunes; uniform sampler2D uInscription; uniform vec2 uView; uniform vec3 uMouse; uniform float uHas; uniform float uTime; uniform float uSweep; uniform vec3 uRune;
-          varying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome;`)
+          varying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome;\n${GROUND_FN}`)
         .replace('#include <color_fragment>', `#include <color_fragment>\n${STONE_COLOR}`)
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = .9 + crack * .08;')
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${STONE_RELIEF}`)
@@ -221,6 +234,12 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     scene.add(this.leafMesh);
 
     this.resize();
+    /* the physics engine loads in the background, in its own chunk, so it never holds up the opening */
+    import('./physics').then((m) => m.StonePhysics.create()).then((p) => {
+      p.setGround(-this.hh * 0.96);
+      p.onHit = (strength, x) => sound.hit(strength, x / this.hw);
+      this.physics = p;
+    }).catch(() => { /* no WebAssembly: the simple fall stays */ });
     this.assign(first[0], true);
     this.uni.uRune.value.copy(this.runeTarget);
     this.bind();
@@ -229,6 +248,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       document.fonts.load(`40px ${RUNE_FONT}`, GLYPHS[0x22]),
     ])).then(() => {
       this.runes.redraw();
+      this.sky.rebuild();
       this.layouts.clear();
       this.assign(this.sequence[this.seqIndex], this.time < 1.2);
     }).catch(() => { /* fonts are optional; the system fallbacks still draw */ });
@@ -241,6 +261,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     this.seqIndex = 0;
     this.seqTimer = 0;
     this.held = false;
+    this.physics?.release();
     this.assign(shapes[0]);
     sound.whoosh(1.8);
     this.swept = false;
@@ -250,6 +271,19 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     cancelAnimationFrame(this.raf);
     this.unbind();
     this.renderer.dispose();
+  }
+
+  /** Drop the stones: real physics if its engine is ready, else the field's simple fall. */
+  private drop() {
+    this.field.crumble();
+    this.physics?.drop(this.field.stones.filter((s) => s.mode === 'fall'));
+  }
+
+  /** Lift the stones from wherever they lie and send them back into the shape. */
+  private rise() {
+    this.physics?.release();
+    this.field.rebuild();
+    sound.whoosh(1.4, 0.8);
   }
 
   /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
@@ -287,6 +321,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     this.hw = this.hh * this.camera.aspect;
     this.uni.uView.value.set(this.hw, this.hh);
     this.floor.position.y = -this.hh * 0.96;
+    this.physics?.setGround(-this.hh * 0.96);
     this.field.setView(this.hw, this.hh);
     this.layouts.clear();
   };
@@ -304,7 +339,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
   };
   private readonly onLeave = () => { this.pointer.has = false; };
   private readonly onDown = (e: PointerEvent) => {
-    const timer = window.setTimeout(() => { if (!this.introDone) return; this.held = true; this.canvas.classList.add('held'); this.field.crumble(); }, e.pointerType === 'mouse' ? 140 : 280);
+    const timer = window.setTimeout(() => { if (!this.introDone) return; this.held = true; this.canvas.classList.add('held'); this.drop(); }, e.pointerType === 'mouse' ? 140 : 280);
     this.press = { x: e.clientX, y: e.clientY, timer };
   };
   private readonly onUp = (e: PointerEvent) => {
@@ -312,7 +347,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     clearTimeout(this.press.timer);
     const dy = e.clientY - this.press.y, dx = e.clientX - this.press.x;
     if (!this.held && e.pointerType !== 'mouse' && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) this.opts.onStep(dy < 0 ? 1 : -1);
-    if (this.held) { this.held = false; this.field.rebuild(); sound.whoosh(1.4, 0.8); }
+    if (this.held) { this.held = false; this.rise(); }
     this.press = null;
     this.canvas.classList.remove('held');
     if (e.pointerType !== 'mouse') this.pointer.has = false;
@@ -335,7 +370,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       e.preventDefault();
       if (!this.introDone) return;
       this.held = !this.held;
-      if (this.held) this.field.crumble(); else { this.field.rebuild(); sound.whoosh(1.4, 0.8); }
+      if (this.held) this.drop(); else this.rise();
     }
   };
 
@@ -397,6 +432,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       this.ray.setFromCamera(this.ndc, this.camera);
       if (this.ray.ray.intersectPlane(this.plane, this.hit)) { this.pointer.x = this.hit.x; this.pointer.y = this.hit.y; }
     }
+    this.physics?.step(dt);
     this.field.step(dt * 0.5, this.time, this.pointer);
     this.field.step(dt * 0.5, this.time, this.pointer);
 
@@ -454,6 +490,8 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       this.camBase.z,
     );
     this.camera.lookAt(this.look);
+    this.camera.updateMatrixWorld();
+    this.sky.update(dt, this.camera, this.pointer.has ? this.ray.ray.direction : null);
     this.renderer.render(this.scene, this.camera);
   };
 }

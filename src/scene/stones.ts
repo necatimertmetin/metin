@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { groundHeight } from './ground';
 import type { StoneSpot } from './shapes';
 
-export type Mode = 'emerge' | 'lift' | 'go' | 'home' | 'fall' | 'rest' | 'away';
+/** `phys`: moved by the physics engine (see physics.ts), not by this field */
+export type Mode = 'emerge' | 'lift' | 'go' | 'home' | 'fall' | 'rest' | 'away' | 'phys';
 
 export type Stone = {
   p: THREE.Vector3; v: THREE.Vector3;
@@ -170,7 +171,7 @@ export class StoneField {
     const target = new THREE.Vector3();
     for (const s of this.stones) {
       const spot = s.spot;
-      if (!spot && s.mode !== 'away') continue;
+      if ((!spot && s.mode !== 'away') || s.mode === 'phys') continue;
       s.t += dt;
       if (s.mode === 'emerge' && spot) {
         /* lies in the rock, then trembles, cracks free and rises out of it, turning slowly upright */

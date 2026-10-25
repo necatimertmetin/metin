@@ -67,7 +67,7 @@ float fine = 1. - smoothstep(.25, .7, length(fwidth(w)) * 14.);
 stoneC *= 1. + (n3(w * 22.) - .5) * .35 * fine + (n3(w * 61.) - .5) * .2 * fine;
 /* weathering: darker streaks where rain ran down the stone */
 stoneC *= 1. - .14 * smoothstep(.55, .85, n3(vec3(w.x * 2.5, w.y * .3, w.z * 2.5) + 11.)) * smoothstep(.4, .7, n3(w * .8 + 4.));
-/* glyph 64 marks a slab: its whole front face carries the inscription texture (same R = cut, G = halo) instead of one rune */
+/* glyph 64 marks a slab: its whole front face carries the inscription texture (same R = cut, G = halo, B = depth) instead of one rune */
 float slab = step(63.5, vMisc.x);
 float side = min(vSize.x, vSize.y) * .76;
 vec2 guv = vLocal.xy * vSize.xy / side + .5;
@@ -82,7 +82,7 @@ float carve = rt.b;
 float core = rune * smoothstep(.3, .75, carve);
 diffuseColor.rgb = stoneC * (1. - carve * .5);
 /* still in the ground, the stone wears the ground's own surface, so it can't be told apart until it breaks free */
-if (vHome.z > 0.) { float bc, bm, bf; diffuseColor.rgb = mix(diffuseColor.rgb, groundAlbedo(vWPos, bc, bm, bf), vHome.z); }
+if (vHome.z > 0.) { float bc, bm, bf; diffuseColor.rgb = mix(diffuseColor.rgb, groundAlbedo(vWPos, bc, bm, bf) * (1. - groundRune(vWPos).b * .5), vHome.z); }
 `;
 
 /** Fine relief from cracks, pits and the rune, applied with screen-space derivatives. */
@@ -118,40 +118,62 @@ float sweep = step(.001, uSweep) * exp(-pow((mix(vHome.x, vWPos.x, slab) - sx) /
 float idle = smoothstep(.93, 1., sin(uTime * .7 + vMisc.y * 40.)) * .7;
 float glow = clamp(near * 1.9 + sweep * 1.4 + idle, 0., 1.9) * (.85 + .15 * sin(uTime * 9. + vMisc.y * 20.));
 /* runes smoulder from the bottom of the cut; the pointer, the sweep and the idle flicker light them up fully */
-totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - moss * .6)) * glow + core * .65 + rt.g * .03 + crack * .03);
+totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - moss * .6)) * glow + core * mix(.65, 1.6, step(64.5, vMisc.x)) + rt.g * mix(.03, .1, step(64.5, vMisc.x)) + crack * .03);
 `;
 
 /**
- * The ground rock's colour at world point `p`, with how much crack, moss and fine detail is there.
- * Shared by the ground and by stones still lying in it, so the two match exactly.
+ * The ground: the very same stone as the stones (their palette, grain, cracks, pits, rain streaks and moss at the same
+ * scale), with runes cut into it here and there. Shared by the ground and by stones still lying in it, so the two match.
+ * Needs `uRunes` declared before it.
  */
 export const GROUND_FN = /* glsl */ `
+/* a rune cut into the rock on a loose grid, about one cell in four, at a random quarter turn (R = cut, G = halo, B = depth) */
+vec4 groundRune(vec3 p) {
+  vec2 q = p.xz / 1.4, cell = floor(q);
+  float has = step(h3(vec3(cell, 7.)), .27);
+  vec2 f = fract(q) - .5;
+  float k = floor(h3(vec3(cell, 13.)) * 4.);
+  f = k < 1. ? f : k < 2. ? vec2(-f.y, f.x) : k < 3. ? -f : vec2(f.y, -f.x);
+  vec2 guv = vec2(f.x, -f.y) / .6 + .5;
+  float inside = step(0., guv.x) * step(guv.x, 1.) * step(0., guv.y) * step(guv.y, 1.);
+  float g = floor(h3(vec3(cell, 29.)) * 64.);
+  vec2 c = vec2(mod(g, 8.), floor(g / 8.));
+  return texture2D(uRunes, vec2((c.x + clamp(guv.x, 0., 1.)) / 8., (7. - c.y + clamp(guv.y, 0., 1.)) / 8.)) * has * inside;
+}
+
 vec3 groundAlbedo(vec3 p, out float gcrack, out float gmoss, out float gfine) {
-  vec3 gw = p * 1.1;
-  float gn = fbm3(gw * .3);
-  gcrack = (1. - smoothstep(.0, .035, abs(n3(gw * .8) - .5))) * smoothstep(.45, .7, n3(gw * .25 + 3.));
-  gcrack = max(gcrack, (1. - smoothstep(.0, .03, abs(n3(gw * 2.1 + 9.) - .5))) * smoothstep(.55, .8, n3(gw * .6 + 5.)) * .6);
-  gfine = 1. - smoothstep(.3, .9, length(fwidth(gw)) * 7.);
-  /* darker than the stones: the ground faces the sun square on, the stones' faces only at a slant */
-  vec3 groundC = mix(vec3(.016, .0145, .013), vec3(.038, .034, .029), smoothstep(.2, .8, gn));
-  /* a crisp network of joints between the rock's slabs, antialiased so it stays sharp at a slant */
-  float gjw = fwidth(n3(gw * 1.6 + 2.)) * 1.5;
-  float gjoint = 1. - smoothstep(.004, .012 + gjw, abs(n3(gw * 1.6 + 2.) - .5));
-  gcrack = max(gcrack, gjoint * .45 * smoothstep(.35, .65, n3(gw * .5 + 8.)));
-  groundC *= (.85 + .3 * fbm3(gw * 1.4)) * (1. + (n3(gw * 22.) - .5) * .35 * gfine) * (1. - .6 * gcrack);
-  gmoss = smoothstep(.56, .76, fbm3(gw * .5 + 5.)) * (1. - gcrack * .5);
-  groundC = mix(groundC, mix(vec3(.018, .03, .009), vec3(.04, .065, .018), fbm3(gw * 4.)), gmoss * .8);
+  vec3 w = p * 3. + 19.;
+  float nA = fbm3(w * 1.4);
+  gcrack = (1. - smoothstep(.0, .05, abs(n3(w * 1.9) - .5))) * smoothstep(.45, .7, n3(w * .7 + 3.));
+  /* the stones' fine second crack layer, kept faint: spread wide over the ground it would read as dried mud */
+  gcrack = max(gcrack, (1. - smoothstep(.0, .04, abs(n3(w * 3.2 + 9.) - .5))) * smoothstep(.55, .8, n3(w * 1.3 + 5.)) * .2);
+  float pits = smoothstep(.6, .85, fbm3(w * 3.5));
+  vec3 c = mix(vec3(.085, .077, .066), vec3(.145, .13, .112), smoothstep(.2, .8, fbm3(w * .4)));
+  c *= (.84 + .32 * nA) * (1. - .3 * pits) * (1. - .6 * gcrack);
+  gfine = 1. - smoothstep(.25, .7, length(fwidth(w)) * 14.);
+  c *= 1. + (n3(w * 22.) - .5) * .35 * gfine + (n3(w * 61.) - .5) * .2 * gfine;
+  c *= 1. - .14 * smoothstep(.55, .85, n3(vec3(w.x * 2.5, w.y * .3, w.z * 2.5) + 11.)) * smoothstep(.4, .7, n3(w * .8 + 4.));
+  /* moss as on the stones' upper faces, and in the cracks */
+  gmoss = smoothstep(.5, .72, fbm3(w * 1.8 + 5.)) * .3;
+  gmoss = max(gmoss, gcrack * smoothstep(.4, .7, fbm3(w * 2.6)) * .9);
+  c = mix(c, mix(vec3(.06, .10, .025), vec3(.16, .24, .06), fbm3(w * 5.)), gmoss);
+  /* the ground meets the sun square on, the stones' faces at a slant: a little darker so the two read as one stone */
+  c *= .45;
+  /* and a touch cooler: the stones' faces catch the cool fill light, the ground only the warm sun and sky */
+  c *= vec3(.92, .96, 1.07);
   /* the rock is an island of stone under the shapes; away from them it sinks into the dark */
-  groundC *= smoothstep(14., 2., length(p.xz - vec2(0., -2.)));
-  return groundC;
+  c *= smoothstep(14., 2., length(p.xz - vec2(0., -2.)));
+  return c;
 }
 `;
 
 /** The ground rock: the shared albedo, then the holes stones left, cut right through it. */
 export const GROUND_COLOR = /* glsl */ `
-vec3 gw = vGPos * 1.1;
+vec3 gw = vGPos * 3. + 19.;
 float gcrack, gmoss, gfine;
 vec3 groundC = groundAlbedo(vGPos, gcrack, gmoss, gfine);
+vec4 grt = groundRune(vGPos);
+groundC *= 1. - grt.b * .5;
 /* holes left where stones broke out: dark inside, shaded down their walls */
 vec4 gh = texture2D(uHoles, vec2((vGPos.x + uHolesRect.x) / uHolesRect.z, 1. - (vGPos.z - uHolesRect.y) / uHolesRect.w));
 /* inside a hole there is no ground at all: the pit below shows through */
@@ -162,14 +184,19 @@ diffuseColor.rgb = groundC;
 
 /** The ground's fine relief, from its cracks and grain, with the same safeguards as the stones'. */
 export const GROUND_RELIEF = /* glsl */ `
-float gBh = -gcrack * .9 + (fbm3(gw * 3.) - .5) * .5 + ((fbm3(gw * 9.) - .5) * .7 + (n3(gw * 28.) - .5) * .35) * gfine - gh.g * 2.5;
+float gBh = -gcrack * .8 + (fbm3(gw * 3.) - .5) * .4 + ((fbm3(gw * 9.) - .5) * .5 + (n3(gw * 28.) - .5) * .25) * gfine - grt.b * 1.1 - gh.g * 2.5;
 vec3 gVp = -vViewPosition; vec3 gDpx = dFdx(gVp); vec3 gDpy = dFdy(gVp);
 float gDhx = dFdx(gBh); float gDhy = dFdy(gBh);
 vec3 gR1 = cross(gDpy, normal); vec3 gR2 = cross(normal, gDpx);
 float gDet = dot(gDpx, gR1);
-vec3 gGrad = sign(gDet) * (gDhx * gR1 + gDhy * gR2) * .018;
+vec3 gGrad = sign(gDet) * (gDhx * gR1 + gDhy * gR2) * .007;
 float gLim = abs(gDet) * .7, gLen = length(gGrad);
 if (gLen > gLim) gGrad *= gLim / gLen;
 vec3 gN = normalize(abs(gDet) * normal - gGrad);
 if (dot(gN, normalize(vViewPosition)) > .05) normal = gN;
+`;
+
+/** The ground's runes glow faintly from the bottom of their cuts, like the stones'. */
+export const GROUND_EMISSIVE = /* glsl */ `
+totalEmissiveRadiance += uRune * grt.r * smoothstep(.3, .75, grt.b) * .45 * smoothstep(20., 3., length(vGPos.xz - vec2(0., -2.)));
 `;
