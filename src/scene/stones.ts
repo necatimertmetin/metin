@@ -66,12 +66,12 @@ function newStone(x: number, y: number, z: number): Stone {
  */
 export class StoneField {
   stones: Stone[] = [];
-  /** set to 1 whenever a stone lands; the scene turns it into a small camera shake */
+  /** how much the view is shaking (the scene raises it as stones land, and lets it die away) */
   shake = 0;
   /** called when a buried stone breaks out of the ground, with the hole it leaves: centre, footprint, depth and turn */
   onBreak: ((x: number, y: number, z: number, w: number, d: number, depth: number, angle: number) => void) | null = null;
   /** called when a falling stone hits the ground, `strength` 0 to 1 */
-  onLand: ((strength: number, x: number) => void) | null = null;
+  onLand: ((strength: number, x: number, size: number) => void) | null = null;
   /** called when a stone settles into its place in a shape */
   onHome: ((x: number) => void) | null = null;
   private hw = 1;
@@ -217,8 +217,8 @@ export class StoneField {
         const floorY = this.floorAt(s.p.x, s.p.z);
         if (s.p.y - ey <= floorY && s.v.y < 0) {
           s.p.y = floorY + ey;
-          this.onLand?.(Math.min(1, -s.v.y / 18), s.p.x);
-          if (s.v.y < -5) { s.v.y *= -0.16; s.v.x *= 0.5; s.v.z *= 0.5; s.w.multiplyScalar(0.4); this.shake = Math.min(0.12, this.shake + 0.012); }
+          this.onLand?.(Math.min(1, -s.v.y / 18), s.p.x, Math.cbrt(s.size.x * s.size.y * s.size.z));
+          if (s.v.y < -5) { s.v.y *= -0.16; s.v.x *= 0.5; s.v.z *= 0.5; s.w.multiplyScalar(0.4); }
           else {
             /* and tips over onto whichever face is nearest the ground, right there */
             restPose(s.q.setFromEuler(s.r));

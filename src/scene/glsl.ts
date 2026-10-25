@@ -62,9 +62,20 @@ vec3 stoneC = mix(vec3(.085, .077, .066), vec3(.145, .13, .112), smoothstep(.2, 
 stoneC *= (.84 + .32 * nA) * (1. - .3 * pits) * (1. - .6 * crack);
 /* fine grain: mineral speckle, faded out where a stone is too small on screen to show it without shimmering */
 float fine = 1. - smoothstep(.25, .7, length(fwidth(w)) * 14.);
-stoneC *= 1. + (n3(w * 22.) - .5) * .35 * fine + (n3(w * 61.) - .5) * .2 * fine;
+stoneC *= 1. + (n3(w * 22.) - .5) * .15 * fine + (n3(w * 61.) - .5) * .08 * fine;
 /* weathering: darker streaks where rain ran down the stone */
 stoneC *= 1. - .14 * smoothstep(.55, .85, n3(vec3(w.x * 2.5, w.y * .3, w.z * 2.5) + 11.)) * smoothstep(.4, .7, n3(w * .8 + 4.));
+/* the grain of real stone, cast onto each face from the three directions it mostly faces, from a different part of the
+   picture on every stone: its light and dark (around its average, so the colour stays the stone's), its height for the
+   relief, its roughness */
+vec3 stoneTp = vLocal * vSize * 1.5 + vMisc.y * vec3(7.3, 3.1, 5.7);
+vec3 stoneTw = pow(abs(normalize(vSN)), vec3(4.));
+stoneTw /= dot(stoneTw, vec3(1.));
+vec3 stoneTex = texture2D(uDetail, stoneTp.yz).rgb * stoneTw.x + texture2D(uDetail, stoneTp.xz).rgb * stoneTw.y + texture2D(uDetail, stoneTp.xy).rgb * stoneTw.z;
+/* the relief takes the picture's height softened (a coarser level of it): its finest detail, turned into slope pixel by
+   pixel, would light up in blocks */
+float stoneH = texture2D(uDetail, stoneTp.yz, 2.5).g * stoneTw.x + texture2D(uDetail, stoneTp.xz, 2.5).g * stoneTw.y + texture2D(uDetail, stoneTp.xy, 2.5).g * stoneTw.z;
+stoneC *= mix(1., clamp(pow(stoneTex.r / .3, 1.4), .3, 2.), .9);
 float side = min(vSize.x, vSize.y) * .76;
 vec2 guv = vLocal.xy * vSize.xy / side + .5;
 float inG = step(0., guv.x) * step(guv.x, 1.) * step(0., guv.y) * step(guv.y, 1.) * step(.47, vLocal.z);
@@ -82,8 +93,8 @@ if (vHome.z > 0.) { float bc, bm, bf; diffuseColor.rgb = mix(diffuseColor.rgb, g
 
 /** Fine relief from cracks, pits and the rune, applied with screen-space derivatives. */
 export const STONE_RELIEF = /* glsl */ `
-float sBh = -crack * .8 - pits * .3 + (fbm3(w * 3.) - .5) * .4 - carve * 1.1
-          + ((fbm3(w * 9.) - .5) * .5 + (n3(w * 28.) - .5) * .25) * fine;
+float sBh = -crack * .8 - pits * .3 + (fbm3(w * 3.) - .5) * .4 - carve * 1.1 + (stoneH - .67) * 2.6
+          + (fbm3(w * 9.) - .5) * .2 * fine;
 vec3 sVp = -vViewPosition; vec3 sDpx = dFdx(sVp); vec3 sDpy = dFdy(sVp);
 float sDhx = dFdx(sBh); float sDhy = dFdy(sBh);
 vec3 sR1 = cross(sDpy, normal); vec3 sR2 = cross(normal, sDpx);
@@ -121,6 +132,23 @@ totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - m
  * Needs `uRunes` declared before it.
  */
 export const GROUND_FN = /* glsl */ `
+/* the grain of real stone (see uDetail in RuinsScene), as on the stones; groundAlbedo leaves what it read in gTex */
+uniform sampler2D uDetail;
+vec3 gTex;
+/*
+ * The picture without its repeat: across the ground, slowly varying noise picks one of eight versions of it, each turned
+ * and shifted its own way, and blends between neighbouring versions where they meet, so no grid of copies shows.
+ * Sampled with the original derivatives (turned with it), so the blend's seams don't break the filtering.
+ */
+vec3 gDetail(vec2 uv, float blur) {
+  vec2 dx = dFdx(uv) * blur, dy = dFdy(uv) * blur;
+  float l = n3(vec3(uv * .09, 1.7)) * 8., f = fract(l), ia = floor(l), ib = ia + 1.;
+  float ca = cos(ia * 2.39), sa = sin(ia * 2.39), cb = cos(ib * 2.39), sb = sin(ib * 2.39);
+  mat2 ra = mat2(ca, -sa, sa, ca), rb = mat2(cb, -sb, sb, cb);
+  vec3 a = textureGrad(uDetail, ra * uv + sin(vec2(3., 7.) * ia) * 3., ra * dx, ra * dy).rgb;
+  vec3 b = textureGrad(uDetail, rb * uv + sin(vec2(3., 7.) * ib) * 3., rb * dx, rb * dy).rgb;
+  return mix(a, b, smoothstep(.2, .8, f - .1 * (a.r - b.r + a.g - b.g)));
+}
 /* small runes cut into the rock on a loose grid, in about two cells in five, at a random quarter turn (R = cut, G = halo, B = depth) */
 vec4 groundRune(vec3 p) {
   vec2 q = p.xz / .9, cell = floor(q);
@@ -145,7 +173,12 @@ vec3 groundAlbedo(vec3 p, out float gcrack, out float gmoss, out float gfine) {
   vec3 c = mix(vec3(.085, .077, .066), vec3(.145, .13, .112), smoothstep(.2, .8, fbm3(w * .4)));
   c *= (.84 + .32 * nA) * (1. - .3 * pits) * (1. - .6 * gcrack);
   gfine = 1. - smoothstep(.25, .7, length(fwidth(w)) * 14.);
-  c *= 1. + (n3(w * 22.) - .5) * .35 * gfine + (n3(w * 61.) - .5) * .2 * gfine;
+  c *= 1. + (n3(w * 22.) - .5) * .15 * gfine + (n3(w * 61.) - .5) * .08 * gfine;
+  /* the real stone's light and dark, at the stones' scale, so ground and stones are one rock */
+  gTex = gDetail(p.xz * 1.5 + 3.7, 1.);
+  /* the relief from a softened reading of it, as on the stones */
+  gTex.g = gDetail(p.xz * 1.5 + 3.7, 6.).g;
+  c *= mix(1., clamp(pow(gTex.r / .3, 1.4), .3, 2.), .9);
   c *= 1. - .14 * smoothstep(.55, .85, n3(vec3(w.x * 2.5, w.y * .3, w.z * 2.5) + 11.)) * smoothstep(.4, .7, n3(w * .8 + 4.));
   /* moss as on the stones' upper faces, and in the cracks */
   gmoss = smoothstep(.5, .72, fbm3(w * 1.8 + 5.)) * .3;
@@ -178,7 +211,7 @@ diffuseColor.rgb = groundC;
 
 /** The ground's fine relief, from its cracks and grain, with the same safeguards as the stones'. */
 export const GROUND_RELIEF = /* glsl */ `
-float gBh = -gcrack * .8 + (fbm3(gw * 3.) - .5) * .4 + ((fbm3(gw * 9.) - .5) * .5 + (n3(gw * 28.) - .5) * .25) * gfine - grt.b * 1.1 - gh.g * 2.5;
+float gBh = -gcrack * .8 + (fbm3(gw * 3.) - .5) * .4 + (gTex.g - .67) * 3.5 + (fbm3(gw * 9.) - .5) * .2 * gfine - grt.b * 1.1 - gh.g * 2.5;
 vec3 gVp = -vViewPosition; vec3 gDpx = dFdx(gVp); vec3 gDpy = dFdy(gVp);
 float gDhx = dFdx(gBh); float gDhy = dFdy(gBh);
 vec3 gR1 = cross(gDpy, normal); vec3 gR2 = cross(normal, gDpx);
