@@ -258,6 +258,50 @@ export const sound = {
     n.start(t, Math.random() * 1.2, dur);
   },
 
+  /** The opening stone driven into the rock: a deep boom with a long rumbling tail. */
+  boom() {
+    if (!live()) return;
+    const { c, g, t, end } = voice(0, 3.5);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(1, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, end);
+    /* the body of it: a low tone falling away */
+    const o = c.createOscillator(), og = c.createGain();
+    o.frequency.setValueAtTime(78, t);
+    o.frequency.exponentialRampToValueAtTime(28, t + 1.6);
+    og.gain.setValueAtTime(0.9, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 2.4);
+    o.connect(og).connect(g);
+    o.start(t); o.stop(end);
+    /* the crack of stone on stone, then rubble settling */
+    const n = source(c, true), lp = c.createBiquadFilter(), ng = c.createGain();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2400, t);
+    lp.frequency.exponentialRampToValueAtTime(180, t + 2.5);
+    ng.gain.setValueAtTime(0.7, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 3.2);
+    n.connect(lp).connect(ng).connect(g);
+    n.start(t); n.stop(end);
+  },
+
+  /** Power gathering in the opening stone before it falls: a swelling hum that rises in pitch. */
+  charge(dur: number) {
+    if (!live()) return;
+    const { c, g, t, end } = voice(0, dur + 0.1);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + dur * 0.9);
+    g.gain.exponentialRampToValueAtTime(0.0001, end);
+    for (const [f, type] of [[110, 'sawtooth'], [165, 'sine']] as const) {
+      const o = c.createOscillator(), lp = c.createBiquadFilter();
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * 2.4, t + dur);
+      lp.type = 'lowpass'; lp.frequency.value = 900;
+      o.connect(lp).connect(g);
+      o.start(t); o.stop(end);
+    }
+  },
+
   /** Stones lifting and flying: a broad rush of air over `dur` seconds. */
   whoosh(dur = 1.6, strength = 1) {
     if (!live()) return;

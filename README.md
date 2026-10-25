@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# Metin
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The personal site of Mert Metin, frontend developer. *Metin* is both a name and a word: text, carved in stone.
 
-Currently, two official plugins are available:
+Words and shapes are built from floating stones, each cut with an Old Turkic rune. Strike the stone to begin: the stones
+break out of the ground rock and gather into the word. Move the pointer to light the runes, look up to the sky, where
+four constellations write 𐱅𐰭𐰼𐰃 (Teŋri), hold to drop the stones, scroll to carve the next shape.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
+npm run dev      # local development
+npm run build    # production build in dist/
+npm run preview  # serve the build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Where things are
+
+| | |
+|---|---|
+| `src/content.ts` | the scenes, their shapes and texts (TR / EN) |
+| `src/scene/shapes.ts` | turning text, SVG paths or canvas drawings into stone layouts (`stoneText`, `stonePath`, `stoneDraw`) |
+| `src/scene/marks.ts` | ready-made shapes |
+| `src/scene/RuinsScene.ts` | the scene: renderer, lights, camera, input, the opening strike |
+| `src/scene/stones.ts` | how stones move: emerging, flying to shapes, falling |
+| `src/scene/physics.ts` | rigid-body physics for dropped stones (Rapier) |
+| `src/scene/glsl.ts` | the stone and ground shaders |
+| `src/scene/sky.ts` | the night sky, the Milky Way and the rune constellations |
+| `src/scene/sound.ts` | all sound, synthesised with Web Audio |
+
+`public/og.jpg` is the link preview image; once the site has its address, make `og:image` in `index.html` a full URL.
