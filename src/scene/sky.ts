@@ -202,16 +202,24 @@ export type SkyProject = { glyph: number; az: number; el: number; name: string; 
 const NEBULA_FRAG = /* glsl */ `
 ${NOISE3}
 uniform vec3 uColor; uniform float uLit; uniform float uShow; uniform float uTime;
-uniform float uOpen; uniform float uFade; uniform sampler2D uLogo; uniform float uAspect; uniform float uHasLogo;
+uniform float uOpen; uniform float uFade; uniform sampler2D uLogo; uniform float uAspect; uniform float uHasLogo; uniform float uSeed;
 varying vec2 vUv;
 float logoA(vec2 lp) { return all(greaterThan(lp, vec2(0.))) && all(lessThan(lp, vec2(1.))) ? texture2D(uLogo, lp).a : 0.; }
 void main() {
   vec2 p = vUv * 2. - 1.;
   float r = length(p);
-  vec3 q = vec3(p * 2.2, uTime * .02);
-  float n = fbm3(q + fbm3(q * 1.7 + 3.) * .8);
-  float wisps = smoothstep(.22 - uOpen * .08, .8, n) * (1. - smoothstep(.2, 1., r));
-  float core = exp(-r * r * 3.);
+  /* each cloud its own (uSeed): turned and drawn out its own way, its own grain and twist, some soft and puffed,
+     some drawn into filaments, some crossed by dark lanes of dust, the brightest part off the middle */
+  float ang = uSeed * 1.7;
+  vec2 sp = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p * vec2(1. + .5 * fract(uSeed * .37), 1. - .3 * fract(uSeed * .61));
+  float r2 = length(sp);
+  vec3 q = vec3(sp * (1.7 + 1.1 * fract(uSeed * .53)), uTime * .02 + uSeed * 9.);
+  float n = fbm3(q + fbm3(q * 1.7 + 3. + uSeed) * (.55 + .6 * fract(uSeed * .29)));
+  n = mix(n, (1. - abs(2. * n - 1.)) * .9, step(.5, fract(uSeed * .71)) * .55);
+  float lanes = smoothstep(.55, .78, fbm3(q * 2.3 + 7. + uSeed)) * step(.4, fract(uSeed * .43)) * .6;
+  float wisps = smoothstep(.22 - uOpen * .08, .8, n) * (1. - smoothstep(.2, 1., r2)) * (1. - lanes);
+  vec2 off = (vec2(fract(uSeed * .13), fract(uSeed * .19)) - .5) * .35;
+  float core = exp(-dot(p - off, p - off) * (2.4 + 1.6 * fract(uSeed * .83)));
   float a = (wisps + core * (.5 - uOpen * .3)) * (.3 + uLit * .7) * uFade * uShow;
   vec3 col = mix(uColor * .6, uColor + .2, smoothstep(.45, .9, n));
   vec3 rgb = col * a * 1.5;
@@ -439,7 +447,7 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     const ki = ALL.findIndex((k) => k.project === i), k = ALL[ki];
     const uniforms = {
       uColor: { value: new THREE.Color(p.color) }, uLit: { value: 0 }, uShow, uTime,
-      uOpen: { value: 0 }, uFade: { value: 1 }, uLogo: { value: null as THREE.Texture | null }, uAspect: { value: 1 }, uHasLogo: { value: 0 },
+      uOpen: { value: 0 }, uFade: { value: 1 }, uSeed: { value: 1.3 + i * 3.17 }, uLogo: { value: null as THREE.Texture | null }, uAspect: { value: 1 }, uHasLogo: { value: 0 },
     };
     /* what comes alive in the nebula, drawn afresh every frame: Lito's face, or the logo written in letters */
     const face = p.face === 'lito' ? createLito() : p.logo ? createRuneLogo(p.logo, p.color) : null;

@@ -6,6 +6,9 @@ import { GitHubIcon, LinkedInIcon, SoundIcon } from './ui/icons';
 import { sound } from './scene/sound';
 import { Cursor } from './ui/Cursor';
 
+/* the scene pebbles' outlines: a few uneven roundnesses, so no two neighbours are the same stone */
+const PEBBLES = ['46% 54% 58% 42% / 55% 45% 55% 45%', '58% 42% 45% 55% / 48% 58% 42% 52%', '50% 50% 42% 58% / 60% 44% 56% 40%', '42% 58% 52% 48% / 46% 54% 46% 54%'];
+
 export default function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const ruins = useRef<RuinsScene | null>(null);
@@ -105,7 +108,7 @@ export default function App() {
             tabIndex={started ? -1 : 0} onClick={() => ruins.current?.start()} />
           <div className={`gate-hint${started ? ' gone' : ''}`} aria-hidden="true">
             <b>{UI.begin[lang]}</b>
-            <span className="mono">{UI.beginNote[lang]}</span>
+            <span>{UI.beginNote[lang]}</span>
           </div>
         </>
       )}
@@ -123,7 +126,12 @@ export default function App() {
         </aside>
       )}
       <header className="ui tl">
-        <div className="mark">Mert Metin<small className="mono">{UI.role[lang]}</small></div>
+        {/* the name cut in stone; under the pointer it shows itself in Old Turkic letters for a moment */}
+        <div className="mark">
+          <span className="mark-latin">Mert Metin</span>
+          <span className="mark-rune" aria-hidden="true">{'\u{10C22}\u{10C3C}\u{10C45} \u{10C22}\u{10C45}\u{10C03}\u{10C24}'}</span>
+          <small>{UI.role[lang]}</small>
+        </div>
       </header>
       <div className="ui tr">
         {/* the speaker mutes; hovering it (or tabbing to it) opens a volume slider beside it */}
@@ -135,7 +143,7 @@ export default function App() {
               setVolume(v);
               if ((v > 0) !== soundOn) { sound.setEnabled(v > 0); setSoundOn(v > 0); }
             }} />
-          <button type="button" className="sound" aria-pressed={soundOn} aria-label={UI.sound[lang]} title={UI.sound[lang]}
+          <button type="button" className="sound stone-btn" aria-pressed={soundOn} aria-label={UI.sound[lang]} title={UI.sound[lang]}
             onClick={() => {
               const on = !soundOn;
               if (on && volume === 0) { sound.setVolume(0.6); setVolume(0.6); }
@@ -145,30 +153,33 @@ export default function App() {
             <SoundIcon on={soundOn && volume > 0} />
           </button>
         </div>
-        <span className="langs mono" role="group" aria-label={UI.language[lang]}>
+        <span className="langs" role="group" aria-label={UI.language[lang]}>
           {(['tr', 'en'] as const).map((l) => (
-            <button key={l} type="button" aria-pressed={lang === l} onClick={() => setLang(l)}>{l.toUpperCase()}</button>
+            <button key={l} type="button" className="stone-btn stone-txt" aria-pressed={lang === l} onClick={() => setLang(l)}>{l.toUpperCase()}</button>
           ))}
         </span>
       </div>
       <nav className="ui cr" aria-label={UI.scenes[lang]}>
         {SCENES.map((s, i) => (
-          <button key={i} type="button" aria-label={`${UI.scene[lang]} ${i + 1}: ${s.title[lang]}`} aria-current={i === index} onClick={() => go(i)} />
+          /* a pebble for each scene, each its own shape; the current one carries a lit rune; its name shows beside it on hover */
+          <button key={i} type="button" aria-label={`${UI.scene[lang]} ${i + 1}: ${s.title[lang]}`} aria-current={i === index} onClick={() => go(i)}
+            data-name={s.title[lang]} data-rune={String.fromCodePoint(0x10c00 + ((i * 11 + 3) % 73))}
+            style={{ borderRadius: PEBBLES[i % PEBBLES.length] }} />
         ))}
       </nav>
       <div className="ui bl">
-        <div className={`cap ${index !== shown ? 'fade' : ''}`} aria-live="polite">
-          <div className="idx mono">{String(shown + 1).padStart(2, '0')} / {String(SCENES.length).padStart(2, '0')}</div>
+        <div className={`cap slab ${index !== shown ? 'fade' : ''}`} aria-live="polite">
+          <div className="idx">{String(shown + 1).padStart(2, '0')} / {String(SCENES.length).padStart(2, '0')}</div>
           <b>{scene.title[lang]}</b>
           <span>{scene.body[lang]}</span>
         </div>
       </div>
-      <div className="ui bc mono">{UI.hint[lang]}</div>
+      <div className="ui bc">{UI.hint[lang]}</div>
       <footer className="ui br">
         <a className="mail" href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>
         <div className="soc">
-          <a href={CONTACT.github} target="_blank" rel="noopener" aria-label="GitHub"><GitHubIcon /></a>
-          <a href={CONTACT.linkedin} target="_blank" rel="noopener" aria-label="LinkedIn"><LinkedInIcon /></a>
+          <a className="stone-btn" href={CONTACT.github} target="_blank" rel="noopener" aria-label="GitHub"><GitHubIcon /></a>
+          <a className="stone-btn" href={CONTACT.linkedin} target="_blank" rel="noopener" aria-label="LinkedIn"><LinkedInIcon /></a>
         </div>
       </footer>
       </div>
