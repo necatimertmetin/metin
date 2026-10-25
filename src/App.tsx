@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RuinsScene } from './scene/RuinsScene';
 import { CONTACT, SCENES, UI, initialLang, type Lang } from './content';
-import { GitHubIcon, LinkedInIcon } from './ui/icons';
+import { GitHubIcon, LinkedInIcon, SoundIcon } from './ui/icons';
+import { sound } from './scene/sound';
 
 export default function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -10,6 +11,7 @@ export default function App() {
   const [index, setIndex] = useState(0);
   const [shown, setShown] = useState(0);
   const [noGL, setNoGL] = useState(false);
+  const [soundOn, setSoundOn] = useState(sound.enabled);
 
   const step = useCallback((dir: 1 | -1) => setIndex((i) => Math.min(SCENES.length - 1, Math.max(0, i + dir))), []);
 
@@ -53,6 +55,10 @@ export default function App() {
         <div className="mark">Mert Metin<small className="mono">{UI.role[lang]}</small></div>
       </header>
       <div className="ui tr">
+        <button type="button" className="sound" aria-pressed={soundOn} aria-label={UI.sound[lang]} title={UI.sound[lang]}
+          onClick={() => { sound.setEnabled(!soundOn); setSoundOn(!soundOn); }}>
+          <SoundIcon on={soundOn} />
+        </button>
         <span className="langs mono" role="group" aria-label={UI.language[lang]}>
           {(['tr', 'en'] as const).map((l) => (
             <button key={l} type="button" aria-pressed={lang === l} onClick={() => setLang(l)}>{l.toUpperCase()}</button>

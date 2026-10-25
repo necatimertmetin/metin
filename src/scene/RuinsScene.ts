@@ -1,12 +1,15 @@
 import * as THREE from 'three';
-import { STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
-import { GLYPHS, RUNE_FONT, createBackdrop, createEnvironment, createInscription, createLeafTexture, createRuneAtlas } from './textures';
+import { GROUND_COLOR, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
+import { createGroundGeometry } from './ground';
+import { GLYPHS, HOLES_D, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createInscription, createLeafTexture, createRuneAtlas } from './textures';
 import { layStones, type Shape, type StoneSpot } from './shapes';
 import { StoneField, type Pointer } from './stones';
+import { sound } from './sound';
 
 const MAX_STONES = 1200;
 const MAX_LEAVES = 6000;
 const MAX_STEMS = 16000;
+const MAX_PITS = 2400;
 /** the rune and crack light when a shape names no colour: gök (sky) turquoise */
 const RUNE_COLOR = '#7cf4ea';
 const CAM_Z = 14;
@@ -31,6 +34,7 @@ export class RuinsScene {
   private readonly stoneMesh: THREE.InstancedMesh;
   private readonly leafMesh: THREE.InstancedMesh;
   private readonly stemMesh: THREE.InstancedMesh;
+  private readonly pitMesh: THREE.InstancedMesh;
   private readonly floor: THREE.Mesh;
   private readonly lamp = new THREE.PointLight(0x40e0d0, 0, 4.5, 2);
   private readonly aSize: THREE.InstancedBufferAttribute;
@@ -38,6 +42,7 @@ export class RuinsScene {
   private readonly aMisc: THREE.InstancedBufferAttribute;
   private readonly runes = createRuneAtlas();
   private readonly inscription = createInscription();
+  private readonly holes = createHoleMask();
   private readonly uni = {
     uRunes: { value: this.runes.texture as THREE.Texture },
     uInscription: { value: this.inscription.texture as THREE.Texture },
@@ -63,6 +68,8 @@ export class RuinsScene {
   private sweep = 0;
   private swept = false;
   private held = false;
+  /** the opening is over: every stone has come out of the ground and reached its place once; only then can they be dropped */
+  private introDone = false;
   private raf = 0;
   private last = 0;
   private pointer: Pointer = { has: false, x: 0, y: 0 };
@@ -78,6 +85,10 @@ export class RuinsScene {
     this.canvas = canvas;
     this.opts = opts;
     this.field = new StoneField(this.reduced);
+    /* a stone breaking out of the ground leaves its hole behind */
+    this.field.onBreak = (x, y, z, w, d, depth, angle) => { this.addPit(x, y, z, w, d, depth, angle); sound.crack(x / this.hw); };
+    this.field.onLand = (strength, x) => sound.hit(strength, x / this.hw);
+    this.field.onHome = (x) => sound.tick(x / this.hw);
     this.sequence = first;
     const r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     r.toneMapping = THREE.ACESFilmicToneMapping;
@@ -109,8 +120,22 @@ export class RuinsScene {
     const fill = new THREE.DirectionalLight(0xa9bcff, 0.3 * PI);
     fill.position.set(7, 1, 9);
     scene.add(rim, fill, this.lamp);
-    this.floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 40), new THREE.ShadowMaterial({ opacity: 0.45 }));
-    this.floor.rotation.x = -Math.PI / 2;
+    /* the ground: the one great rock the stones break away from */
+    /* little sky reflection: seen at a slant it would wash the dark rock out to a pale sand */
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, envMapIntensity: 0.12 });
+    groundMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uHoles = { value: this.holes.texture };
+      sh.uniforms.uHolesRect = { value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D) };
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGPos;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>\n${NOISE3}\n${GROUND_FN}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect;`)
+        .replace('#include <color_fragment>', `#include <color_fragment>\n${GROUND_COLOR}`)
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(.92, .8, gmoss);')
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${GROUND_RELIEF}`);
+    };
+    this.floor = new THREE.Mesh(createGroundGeometry(), groundMat);
     this.floor.receiveShadow = true;
     scene.add(this.floor);
 
@@ -131,7 +156,7 @@ export class RuinsScene {
         .replace('#include <begin_vertex>', 'vec3 transformed = sp0;\nvLocal = position; vSize = aSize; vMisc = aMisc; vHome = aHome;')
         .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${NOISE3}
+        .replace('#include <common>', `#include <common>\n${NOISE3}\n${GROUND_FN}
           uniform sampler2D uRunes; uniform sampler2D uInscription; uniform vec2 uView; uniform vec3 uMouse; uniform float uHas; uniform float uTime; uniform float uSweep; uniform vec3 uRune;
           varying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome;`)
         .replace('#include <color_fragment>', `#include <color_fragment>\n${STONE_COLOR}`)
@@ -161,6 +186,27 @@ export class RuinsScene {
     this.stemMesh.frustumCulled = false;
     this.stemMesh.count = 0;
     scene.add(this.stemMesh);
+
+    /* pits: the holes stones leave in the ground, boxes seen from inside (only their far walls and floor draw) */
+    const pitMat = new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.95, metalness: 0, side: THREE.BackSide });
+    pitMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', `#include <common>
+varying float vDepth;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+vDepth = position.y + .5;`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+varying float vDepth;`)
+        /* darker towards the bottom, where little light gets in */
+        .replace('#include <color_fragment>', `#include <color_fragment>
+diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
+    };
+    this.pitMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), pitMat, MAX_PITS);
+    this.pitMesh.receiveShadow = true;
+    this.pitMesh.frustumCulled = false;
+    this.pitMesh.count = 0;
+    scene.add(this.pitMesh);
 
     const leafTex = createLeafTexture();
     const leafMat = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.55, metalness: 0, envMapIntensity: 0.6 });
@@ -196,6 +242,7 @@ export class RuinsScene {
     this.seqTimer = 0;
     this.held = false;
     this.assign(shapes[0]);
+    sound.whoosh(1.8);
     this.swept = false;
   }
 
@@ -203,6 +250,16 @@ export class RuinsScene {
     cancelAnimationFrame(this.raf);
     this.unbind();
     this.renderer.dispose();
+  }
+
+  /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
+  private addPit(x: number, y: number, z: number, w: number, d: number, depth: number, angle: number) {
+    if (this.pitMesh.count >= MAX_PITS) return;
+    this.holes.add(x, z, w, d, angle);
+    /* y is the stone's centre as it lay, flush with the surface; the pit is the room it took up */
+    this.m.compose(new THREE.Vector3(x, y, z), this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle), this.s.set(w, depth, d));
+    this.pitMesh.setMatrixAt(this.pitMesh.count++, this.m);
+    this.pitMesh.instanceMatrix.needsUpdate = true;
   }
 
   private assign(shape: Shape, intro = false) {
@@ -229,7 +286,7 @@ export class RuinsScene {
     this.hh = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * CAM_Z * 0.82;
     this.hw = this.hh * this.camera.aspect;
     this.uni.uView.value.set(this.hw, this.hh);
-    this.floor.position.y = -this.hh * 0.96 - 0.02;
+    this.floor.position.y = -this.hh * 0.96;
     this.field.setView(this.hw, this.hh);
     this.layouts.clear();
   };
@@ -247,7 +304,7 @@ export class RuinsScene {
   };
   private readonly onLeave = () => { this.pointer.has = false; };
   private readonly onDown = (e: PointerEvent) => {
-    const timer = window.setTimeout(() => { this.held = true; this.canvas.classList.add('held'); this.field.crumble(); }, e.pointerType === 'mouse' ? 140 : 280);
+    const timer = window.setTimeout(() => { if (!this.introDone) return; this.held = true; this.canvas.classList.add('held'); this.field.crumble(); }, e.pointerType === 'mouse' ? 140 : 280);
     this.press = { x: e.clientX, y: e.clientY, timer };
   };
   private readonly onUp = (e: PointerEvent) => {
@@ -255,7 +312,7 @@ export class RuinsScene {
     clearTimeout(this.press.timer);
     const dy = e.clientY - this.press.y, dx = e.clientX - this.press.x;
     if (!this.held && e.pointerType !== 'mouse' && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) this.opts.onStep(dy < 0 ? 1 : -1);
-    if (this.held) { this.held = false; this.field.rebuild(); }
+    if (this.held) { this.held = false; this.field.rebuild(); sound.whoosh(1.4, 0.8); }
     this.press = null;
     this.canvas.classList.remove('held');
     if (e.pointerType !== 'mouse') this.pointer.has = false;
@@ -267,13 +324,18 @@ export class RuinsScene {
     this.wheelLock = now + 1500;
     this.opts.onStep(e.deltaY > 0 ? 1 : -1);
   };
+  /* audio may only start from a gesture, so any press anywhere on the page can be the one */
+  private readonly onAnyPress = () => sound.unlock();
+  private readonly onVisibility = () => sound.setVisible(document.visibilityState === 'visible');
   private readonly onKey = (e: KeyboardEvent) => {
+    sound.unlock();
     if (['ArrowDown', 'ArrowRight', 'PageDown'].includes(e.key)) this.opts.onStep(1);
     if (['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key)) this.opts.onStep(-1);
     if (e.key === ' ' && (e.target as HTMLElement | null)?.tagName !== 'BUTTON') {
       e.preventDefault();
+      if (!this.introDone) return;
       this.held = !this.held;
-      if (this.held) this.field.crumble(); else this.field.rebuild();
+      if (this.held) this.field.crumble(); else { this.field.rebuild(); sound.whoosh(1.4, 0.8); }
     }
   };
 
@@ -286,6 +348,8 @@ export class RuinsScene {
     window.addEventListener('pointercancel', this.onUp);
     window.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('keydown', this.onKey);
+    document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('pointerdown', this.onAnyPress);
   }
   private unbind() {
     window.removeEventListener('resize', this.onResize);
@@ -296,6 +360,8 @@ export class RuinsScene {
     window.removeEventListener('pointercancel', this.onUp);
     window.removeEventListener('wheel', this.onWheel);
     window.removeEventListener('keydown', this.onKey);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('pointerdown', this.onAnyPress);
   }
 
   private readonly ray = new THREE.Raycaster();
@@ -319,10 +385,12 @@ export class RuinsScene {
         this.seqTimer = 0;
         this.seqIndex = (this.seqIndex + 1) % this.sequence.length;
         this.assign(this.sequence[this.seqIndex]);
+        sound.whoosh(1.6, 0.7);
         this.swept = false;
       }
     }
     if (!this.swept && this.field.settled) { this.swept = true; this.sweep = 1; }
+    if (this.field.settled) this.introDone = true;
     this.sweep = Math.max(0, this.sweep - dt / 1.4);
 
     if (this.pointer.has) {
@@ -342,11 +410,12 @@ export class RuinsScene {
       this.s.set(w * st.alive, h * st.alive, d * st.alive);
       this.m.compose(st.p, this.q, this.s);
       this.stoneMesh.setMatrixAt(i, this.m);
-      this.aHome.setXYZ(i, sp ? sp.x : st.p.x, sp ? sp.y : st.p.y, 0);
+      this.aHome.setXYZ(i, sp ? sp.x : st.p.x, sp ? sp.y : st.p.y, st.bury);
       this.aSize.setXYZ(i, w, h, d);
       this.aMisc.setXY(i, sp ? sp.glyph : 0, st.seed);
       if (sp?.vine && st.alive > 0.05) {
-        this.m2.compose(st.p, this.q, this.s.setScalar(st.alive));
+        /* vines only show once the stone is out of the ground */
+        this.m2.compose(st.p, this.q, this.s.setScalar(st.alive * (1 - st.bury)));
         for (const sm of sp.vine.stem) {
           if (ns >= MAX_STEMS) break;
           this.stemMesh.setMatrixAt(ns++, this.m.multiplyMatrices(this.m2, sm));
@@ -364,6 +433,7 @@ export class RuinsScene {
     this.leafMesh.instanceMatrix.needsUpdate = true;
     this.stemMesh.count = ns;
     this.stemMesh.instanceMatrix.needsUpdate = true;
+    this.holes.flush();
 
     const u = this.uni;
     u.uTime.value = this.time;

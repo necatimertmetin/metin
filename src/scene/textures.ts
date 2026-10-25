@@ -181,3 +181,42 @@ export function createInscription() {
   };
   return { texture: tex, paint };
 }
+
+/** The patch of ground the holes are drawn on, in world units: x from -HOLES_W/2, z from HOLES_Z0. */
+export const HOLES_W = 28;
+export const HOLES_D = 14;
+export const HOLES_Z0 = -8;
+
+/**
+ * Where stones have broken out of the ground, seen from above: R = the hole, G = a blur of it that shapes its walls.
+ * Holes are only ever added; `flush` uploads the new ones once a frame.
+ */
+export function createHoleMask() {
+  const px = 2048 / HOLES_W;
+  const [cv, c] = canvas(2048, Math.round(HOLES_D * px));
+  c.fillStyle = '#000';
+  c.fillRect(0, 0, cv.width, cv.height);
+  c.globalCompositeOperation = 'lighter';
+  const tex = new THREE.CanvasTexture(cv);
+  let dirty = false;
+  /** A `w` × `d` hole centred on (x, z), turned by `angle` the way the stone lying in it was. */
+  const add = (x: number, z: number, w: number, d: number, angle: number) => {
+    const draw = (color: string, grow: number) => {
+      c.save();
+      c.translate((x + HOLES_W / 2) * px, (z - HOLES_Z0) * px);
+      c.rotate(-angle);
+      c.fillStyle = color;
+      c.beginPath();
+      c.roundRect((-w / 2) * px - grow, (-d / 2) * px - grow, w * px + grow * 2, d * px + grow * 2, Math.min(w, d) * px * 0.2);
+      c.fill();
+      c.restore();
+    };
+    draw('#f00', 0);
+    c.filter = 'blur(3px)';
+    draw('#0f0', 1);
+    c.filter = 'none';
+    dirty = true;
+  };
+  const flush = () => { if (dirty) { tex.needsUpdate = true; dirty = false; } };
+  return { texture: tex, add, flush };
+}
