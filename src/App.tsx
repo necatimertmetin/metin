@@ -36,7 +36,7 @@ export default function App() {
   return (
     <>
       <canvas ref={canvas} className="stage" aria-hidden="true" />
-      {noGL && <div className="fallback" aria-hidden="true">{'text' in scene.shapes[0] ? scene.shapes[0].text : scene.title[lang]}</div>}
+      {noGL && <div className="fallback" aria-hidden="true">{scene.shapes.flatMap((s) => ('text' in s ? [s.text] : [])).pop() ?? scene.title[lang]}</div>}
 
       <main className="sr-only">
         <h1>Mert Metin, {UI.role[lang]}</h1>

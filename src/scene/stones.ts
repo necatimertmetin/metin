@@ -59,7 +59,6 @@ export class StoneField {
   stones: Stone[] = [];
   /** set to 1 whenever a stone lands; the scene turns it into a small camera shake */
   shake = 0;
-  private cols: Float32Array | null = null;
   private hw = 1;
   private hh = 1;
   private reduced: boolean;
@@ -102,13 +101,13 @@ export class StoneField {
     });
   }
 
-  /** Drop every stone; they land and stack on a column height map along the floor. */
+  /** Drop every stone; each lands on the ground where it falls and stays there. */
   crumble() {
-    this.cols = new Float32Array(Math.ceil((this.hw * 3.2) / 0.12) + 2).fill(-this.hh * 0.96);
     for (const s of this.stones) {
       if (s.mode === 'away' || !s.spot) continue;
       s.mode = 'fall';
-      s.v.set(rnd(1.4), Math.random() * 1.2, rnd(0.6));
+      /* a push forward or back as well, so the stones scatter over the ground instead of landing in one line */
+      s.v.set(rnd(1.4), Math.random() * 1.2, rnd(5));
       s.w.set(rnd(4), rnd(2), rnd(4));
     }
   }
@@ -128,6 +127,7 @@ export class StoneField {
   }
 
   step(dt: number, time: number, pointer: Pointer) {
+    const floorY = -this.hh * 0.96;
     const target = new THREE.Vector3();
     for (const s of this.stones) {
       const spot = s.spot;
@@ -137,35 +137,18 @@ export class StoneField {
         s.v.y += 1.5 * dt;
         s.v.x += (s.p.x > 0 ? 1 : -1) * 2 * dt;
         s.alive = Math.max(0, 1 - s.t / 1.2);
-      } else if (s.mode === 'fall' && spot && this.cols) {
+      } else if (s.mode === 'fall' && spot) {
         s.v.y -= 32 * dt;
-        const [ex, ey] = extents(tmpQ.setFromEuler(s.r), spot);
-        /* everything below is measured under the stone as it is now, so it stays where it touches down */
-        const contact = this.top(s.p.x, ex);
-        const sink = contact - (s.p.y - ey);
-        const l = this.top(s.p.x - ex * 2, ex), r = this.top(s.p.x + ex * 2, ex);
-        if (sink > 0.03 - s.v.y * dt * 1.2) {
-          /* came into the pile from the side (or the pile grew around it): never jump on top, ease out of it instead,
-             sideways if one side is lower, else gently upwards */
-          if (Math.min(l, r) < contact - 0.02) { s.v.x = (l < r ? -1 : 1) * 3; s.v.y *= 0.5; }
-          else { s.p.y += Math.min(sink, 3 * dt); s.v.y = Math.max(s.v.y, 0); }
-        } else if (s.p.y - ey <= contact && s.v.y < 0) {
-          s.p.y = contact + ey;
-          if (s.v.y < -5) { s.v.y *= -0.16; s.v.x *= 0.5; s.w.multiplyScalar(0.4); this.shake = Math.min(0.12, this.shake + 0.012); }
+        const [, ey] = extents(tmpQ.setFromEuler(s.r), spot);
+        /* every stone comes down on the ground where it falls; none stacks on another */
+        if (s.p.y - ey <= floorY && s.v.y < 0) {
+          s.p.y = floorY + ey;
+          if (s.v.y < -5) { s.v.y *= -0.16; s.v.x *= 0.5; s.v.z *= 0.5; s.w.multiplyScalar(0.4); this.shake = Math.min(0.12, this.shake + 0.012); }
           else {
+            /* and tips over onto whichever face is nearest the ground, right there */
             restPose(s.q.setFromEuler(s.r));
-            const [rx, ry] = extents(s.q, spot);
-            const left = this.top(s.p.x - ex * 1.5, ex), right = this.top(s.p.x + ex * 1.5, ex);
-            if (contact - Math.min(left, right) > ry * 1.4) {
-              /* perched on a peak: slide off to the lower side and keep falling, so the pile spreads instead of towering */
-              s.v.y = 0; s.v.x = (left < right ? -1 : 1) * 2.8;
-            } else {
-              /* lie down on the nearest face right here, and raise the pile under it */
-              s.mode = 'rest'; s.v.set(0, 0, 0); s.w.set(0, 0, 0);
-              s.restY = contact + ry;
-              const [c0, c1] = this.colRange(s.p.x, rx);
-              for (let c = c0; c <= c1; c++) this.cols[c] = Math.max(this.cols[c], contact + ry * 2);
-            }
+            s.restY = floorY + extents(s.q, spot)[1];
+            s.mode = 'rest'; s.v.set(0, 0, 0); s.w.set(0, 0, 0);
           }
         }
       } else if (s.mode === 'rest') {
@@ -206,19 +189,5 @@ export class StoneField {
       }
     }
     this.stones = this.stones.filter((s) => s.alive > 0.001);
-  }
-
-  /** Columns under a stone centred at `x` with half width `hx`. */
-  private colRange(x: number, hx: number): [number, number] {
-    const n = this.cols!.length - 1, o = this.hw * 1.6;
-    return [Math.max(0, Math.floor((x - hx + o) / 0.12)), Math.min(n, Math.floor((x + hx + o) / 0.12))];
-  }
-
-  /** Height of the pile under a stone centred at `x` with half width `hx`. */
-  private top(x: number, hx: number) {
-    const [c0, c1] = this.colRange(x, hx);
-    let top = -this.hh * 0.96;
-    for (let c = c0; c <= c1; c++) top = Math.max(top, this.cols![c]);
-    return top;
   }
 }
