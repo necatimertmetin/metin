@@ -333,6 +333,8 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
   const lit = ALL.map(() => ({ value: 0 }));
   /* the constellation opened, if any: it shines, the rest dim */
   let focused = -1;
+  /* the project under the pointer, the one last in play (its stars come back out of its cloud), and one being closed */
+  let hovered = -1, lastActive = -1, closing = -1;
   const uDim = { value: 0 };
   /* the constellations stay hidden until the visitor begins, then fade in */
   const uShow = { value: 0 };
@@ -455,7 +457,7 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     mesh.renderOrder = -9.5;
     group.add(mesh);
     const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(mesh.quaternion), ay = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion);
-    return { ki, mat, mesh, face, ax, ay, span: size / (R * 0.99) };
+    return { ki, mat, mesh, face, ax, ay, span: size / (R * 0.99), wanted: false };
   });
   const rel = new THREE.Vector2();
   /* while a nebula is open, its constellation melts into it */
@@ -529,9 +531,17 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     uDim.value += ((focused >= 0 ? 1 : 0) - uDim.value) * Math.min(1, dt * 2);
     /* an open nebula takes about two seconds to swell and give up its logo, and closes quicker */
     uVanish.value = 0;
+    /* the one in play: the open project, or else the one under the pointer; its stars melt into its cloud */
+    const active = focused >= 0 ? focused : hovered;
+    if (active >= 0) lastActive = active;
+    starMat.uniforms.uFocus.value = lastActive;
     nebulae.forEach((n) => {
       if (!n) return;
-      const u = n.mat.uniforms, want = n.ki === focused ? 1 : 0;
+      const u = n.mat.uniforms, want = n.ki === active ? 1 : 0;
+      /* waking when the pointer comes onto it (or it is opened), saying goodbye when it goes */
+      if (want && !n.wanted) n.face?.stay();
+      if (!want && n.wanted) n.face?.farewell();
+      n.wanted = !!want;
       /* a face saying goodbye holds its cloud open until it has gone */
       const hold = !want && !!n.face?.leaving();
       /* while another project is open, the other clouds fall back */
@@ -576,40 +586,44 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     let best = -1, bestDot = Math.cos(0.075);
     ALL.forEach((k, i) => {
       if (k.project < 0) return;
+      /* an opened cloud is bigger than its stars: the pointer stays on it anywhere over its logo; and the one already
+         under the pointer holds on a little further out, so its edge doesn't flicker on and off */
+      const neb = nebulae.find((n) => n && n.ki === i);
+      const reach = neb && neb.mat.uniforms.uOpen.value > 0.3 ? 0.13 : i === hovered ? 0.1 : 0.075;
       const d = pointerDir.dot(centres[i]);
-      if (d > bestDot) { bestDot = d; best = k.project; }
+      if (d > Math.max(bestDot, Math.cos(reach)) || (d > Math.cos(reach) && best < 0)) { bestDot = d; best = k.project; }
     });
     return best;
+  };
+
+  /** The project under the pointer, or -1: its cloud opens and its logo forms, as a foretaste of opening it. */
+  const hover = (project: number) => {
+    hovered = project < 0 ? -1 : ALL.findIndex((k) => k.project === project);
   };
 
   /** Open a project's constellation (it shines and writes its name; the rest dim), or close it with -1. */
   const focus = (project: number) => {
     const was = focused;
     focused = project < 0 ? -1 : ALL.findIndex((k) => k.project === project);
-    /* closing keeps the last one in focus a moment, so its stars come back out of the nebula instead of popping in */
-    starMat.uniforms.uFocus.value = focused >= 0 ? focused : was;
-    nebulae.forEach((n) => {
-      if (!n?.face) return;
-      if (n.ki === focused) n.face.stay();
-      else if (n.ki === was) n.face.farewell();
-    });
+    /* the one closed now says goodbye with the camera still on it */
+    closing = focused < 0 ? was : -1;
     /* a project with a nebula shows its logo in the cloud instead of writing it in stars */
     if (focused >= 0 && !projects[project]?.color) { void writeName(focused); nameTarget = 1; } else nameTarget = 0;
   };
 
   /** A touch on the open project: true when something there answers it (Lito cheers). */
   const poke = () => {
-    const n = nebulae.find((m) => m && m.ki === focused);
+    const n = nebulae.find((m) => m && m.ki === (focused >= 0 ? focused : hovered));
     if (!n?.face) return false;
     n.face.poke();
     return true;
   };
 
   /** A face is still saying goodbye: the camera stays on it. */
-  const leaving = () => nebulae.some((n) => !!n?.face?.leaving());
+  const leaving = () => closing >= 0 && !!nebulae.find((n) => n && n.ki === closing)?.face?.leaving();
 
   /** How far a nebula is open (0 to 1): the camera leans in on it. */
-  const opened = () => nebulae.reduce((m, n) => Math.max(m, n ? n.mat.uniforms.uOpen.value : 0), 0);
+  const opened = () => nebulae.reduce((m, n) => Math.max(m, n && (n.ki === focused || n.ki === closing) ? n.mat.uniforms.uOpen.value : 0), 0);
 
   /** Where to look to see a project's constellation and the name under it. */
   const gazeAt = (project: number) => {
@@ -619,5 +633,5 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     return k ? onSky(k.az + 8, k.el - k.size * 0.55) : null;
   };
 
-  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, focus, gazeAt, opened, poke, leaving };
+  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, hover, focus, gazeAt, opened, poke, leaving };
 }

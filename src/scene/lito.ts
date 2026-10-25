@@ -38,7 +38,7 @@ export function createLito() {
   const grad = c.createLinearGradient(40, 90, 470, 430);
   STOPS.forEach(([o, col]) => grad.addColorStop(o, col));
 
-  let leave = -1, scatter = 0, t = 0, awake = 0, blinkAt = 2.5, still = 0, cheer = 0, wasHover = false, hop = 0;
+  let paintAcc = 1, leave = -1, scatter = 0, t = 0, awake = 0, blinkAt = 2.5, still = 0, cheer = 0, wasHover = false, hop = 0;
   const look = new THREE.Vector2(), lookWant = new THREE.Vector2(), glance = new THREE.Vector2(), last = new THREE.Vector2();
   let glanceFor = 0, glanceNext = 6;
   let smile = 0, sleepy = 0;
@@ -102,6 +102,10 @@ export function createLito() {
 
     swap(dt);
 
+    /* painted and sent to the graphics card thirty times a second, not every frame */
+    paintAcc += dt;
+    if (paintAcc < 1 / 30) return;
+    paintAcc = 0;
     draw(open, Math.sin(Math.PI * hop), wink);
     texture.needsUpdate = true;
   };

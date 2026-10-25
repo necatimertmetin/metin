@@ -438,22 +438,46 @@ export const sound = {
     rumble(c, g, t, 180, 50, 0.3, 0.15, dur + 0.5, 0.3);
   },
 
-  /** Power gathering in the opening stone before it falls: a swelling hum that rises in pitch. */
-  charge(dur: number) {
+  /**
+   * An ancient seal giving way, over `dur` seconds and then at its breaking: not a stone's sound but an awakening.
+   * Pressure gathering from far below (a drone on D, felt more than heard, steady, nothing in it that repeats), and
+   * the stone cracking under the strain more and more often. Then it breaks (the caller sounds the stone breaking,
+   * heavy) and the pressure lets go in a falling breath.
+   */
+  awaken(dur: number, pan = 0) {
     if (!live()) return;
-    const { c, g, t, end } = voice(0, dur + 0.1);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.16, t + dur * 0.9);
-    g.gain.exponentialRampToValueAtTime(0.0001, end);
-    for (const [f, type] of [[110, 'sawtooth'], [165, 'sine']] as const) {
-      const o = c.createOscillator(), lp = c.createBiquadFilter();
-      o.type = type;
+    const c = ctx!, t = c.currentTime, end = t + dur;
+    const bus = c.createGain(), p = c.createStereoPanner();
+    p.pan.value = pan * 0.5;
+    bus.gain.value = 1;
+    bus.connect(p).connect(master!);
+    /* a little of it out in the open sky (more, and the far echoes would make it go round and round) */
+    if (hall) { const send = c.createGain(); send.gain.value = 0.35; bus.connect(send).connect(hall); }
+
+    /* the pressure: D and A deep down, swelling steadily, letting go in a falling breath at the break */
+    for (const [f, lvl] of [[36.71, 0.55], [55, 0.35], [73.42, 0.18]] as const) {
+      const o = c.createOscillator(), og = c.createGain();
       o.frequency.setValueAtTime(f, t);
-      o.frequency.exponentialRampToValueAtTime(f * 2.4, t + dur);
-      lp.type = 'lowpass'; lp.frequency.value = 900;
-      o.connect(lp).connect(g);
-      o.start(t); o.stop(end);
+      o.frequency.setValueAtTime(f, end);
+      o.frequency.exponentialRampToValueAtTime(f * 0.7, end + 1.6);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(lvl, end - 0.05);
+      og.gain.setValueAtTime(lvl * 1.3, end);
+      og.gain.exponentialRampToValueAtTime(0.0001, end + 2.2);
+      o.connect(og).connect(bus);
+      o.start(t); o.stop(end + 2.4);
     }
+
+    /* the stone straining: low cracks, few at first, crowding in towards the break, each one at its own moment */
+    for (let k = 0; k < 9; k++) {
+      const when = t + dur * (1 - Math.pow(Math.random(), 1.8)) * 0.97;
+      const near = (when - t) / dur;
+      rumble(c, bus, when, 500 + Math.random() * 400, 140, (0.08 + near * 0.22) * (0.6 + Math.random() * 0.6), 0.004, 0.08 + Math.random() * 0.1, 0.6);
+    }
+
+    /* the stone, far under it all */
+    rumble(c, bus, t, 160, 60, 0.12, dur * 0.8, dur + 0.3, 0.28);
+
   },
 
   /** Stones lifting and flying: a broad rush of air over `dur` seconds. */

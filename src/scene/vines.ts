@@ -36,7 +36,7 @@ function loopLength(A: number, B: number, R: number) {
   return 4 * Math.max(0, A - R) + 4 * Math.max(0, B - R) + 2 * Math.PI * R;
 }
 
-const X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3();
+const Y = new THREE.Vector3(), Z = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const tmpQ = new THREE.Quaternion();
 
@@ -84,12 +84,10 @@ export function growVine(w: number, h: number, d: number, g: number): Vine {
         const nn = n1.clone().addScaledVector(a, rnd(0.1, 0.35)).normalize();
         a.addScaledVector(nn, -a.dot(nn)).normalize();
         const b = Y.crossVectors(nn, a);
-        const sz = g * rnd(0.32, 0.5) * (1 - (s / len) * 0.3);
-        /* the leaf texture runs corner to corner, so its local diagonal is turned onto `a` */
-        X.copy(a).sub(b).multiplyScalar(Math.SQRT1_2);
-        const yAxis = a.clone().add(b).multiplyScalar(Math.SQRT1_2);
-        const pos = p1.clone().addScaledVector(a, sz * 0.42).addScaledVector(nn, g * 0.012);
-        leaves.push(new THREE.Matrix4().makeBasis(X.clone(), yAxis, nn).scale(new THREE.Vector3(sz, sz, sz)).setPosition(pos));
+        const sz = g * rnd(0.36, 0.54) * (1 - (s / len) * 0.3);
+        /* the leaf stands stalk down in its square, so its up is turned onto `a`, out from the stem, its stalk at the stem */
+        const pos = p1.clone().addScaledVector(a, sz * 0.46).addScaledVector(nn, g * 0.012);
+        leaves.push(new THREE.Matrix4().makeBasis(b.clone().negate(), a.clone(), nn).scale(new THREE.Vector3(sz, sz, sz)).setPosition(pos));
       }
     }
     p0 = p1;

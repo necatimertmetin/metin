@@ -101,3 +101,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   .cap b { font-size: 20px; }
   .cap span { font-size: 13px; }
 }
+
+/* the panel's words are cut into a tablet in the project's wall; the panel itself stays, unseen, for screen readers and the keyboard */
+.panel.in-stone { width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); animation: none; }

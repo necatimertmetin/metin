@@ -28,7 +28,7 @@ export type Project = {
   link?: { href: string; label: string };
   /** a logo with a transparent background, in public/; when opened, the stars draw its outline instead of the name */
   logo?: string;
-  /** the project's own colour: a nebula behind its constellation, and the light of its runes */
+  /** the project's own colour: a nebula behind its constellation (it opens under the pointer), and its wall's colour when opened */
   color?: string;
   /** a face that comes alive in its nebula when opened, instead of the logo written in letters */
   face?: "lito";
@@ -98,6 +98,7 @@ export const PROJECTS: Project[] = [
       href: "https://github.com/necatimertmetin/traceco2",
       label: "GitHub",
     },
+    color: "#4ade80",
   },
   {
     id: "afterlive",
@@ -115,6 +116,7 @@ export const PROJECTS: Project[] = [
       label: "afterlive",
     },
     logo: "logos/afterlive.png",
+    color: "#ef4444",
   },
   {
     id: "padoboard",
@@ -122,9 +124,14 @@ export const PROJECTS: Project[] = [
     glyph: 0x2f,
     az: 14.5,
     el: 12.3,
-    /* TODO: Mert to write what Padoboard is; left empty rather than guessed */
-    role: { tr: "", en: "" },
-    body: { tr: "", en: "" },
+    role: { tr: "Masaüstü uygulaması · açık kaynak", en: "Desktop app · open source" },
+    body: {
+      tr: "Windows ve Linux için ücretsiz, açık kaynaklı bir soundboard. Sesleri butonlara dizip oyunda ve sesli sohbette arkadaşlarına çalabilir, mikrofonunla kendi sesini değiştirebilir, çok kanallı stüdyosunda kayıt alıp düzenleyebilirsin. Arkadaşların aynı ağdan, tarayıcıdan sana ses çaldırabilir. Sesler ve kayıtlar bilgisayarında kalır, takip yok. Maskotu Pado.",
+      en: "A free, open-source soundboard for Windows and Linux. Put sounds on buttons and play them to your friends in games and voice chat, change your own voice through the microphone, record and edit in its multitrack studio. Friends on the same network can play sounds to you from a browser. Sounds and recordings stay on your computer, nothing is tracked. Its mascot is Pado.",
+    },
+    link: { href: "https://github.com/elifnurdemir/soundboard", label: "GitHub" },
+    logo: "logos/padoboard.png",
+    color: "#c6ff00",
   },
 ];
 
