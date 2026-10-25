@@ -332,7 +332,7 @@ totalEmissiveRadiance += uRune * pGlow;`);
 }
 
 /* a box made stone: corners rounded, faces lumpy, chipped; `taper` narrows it towards the foot */
-function roughBox(w: number, h: number, d: number, seed: number, taper: number) {
+export function roughBox(w: number, h: number, d: number, seed: number, taper: number) {
   const segs = (n: number) => Math.max(2, Math.round(n * 9));
   let g: THREE.BufferGeometry = new THREE.BoxGeometry(w, h, d, segs(w), segs(h), segs(d));
   g.deleteAttribute('uv');
