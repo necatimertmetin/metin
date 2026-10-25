@@ -15,7 +15,11 @@ export type Scene = {
 /** The story, one scene per scroll step. */
 export const SCENES: Scene[] = [
   {
-    shapes: [stoneText('METİN', { rows: 14, maxW: 0.8, maxH: 0.46 })],
+    /* first "Metin" in Orkhon letters (m, t, i, n; right to left, the e unwritten as in the inscriptions), then in Latin */
+    shapes: [
+      stoneText('\u{10C22}\u{10C45}\u{10C03}\u{10C24}', { font: RUNE_FONT, weight: 400, outline: 0.06, rows: 16, maxW: 0.66, maxH: 0.5 }),
+      stoneText('METİN', { rows: 14, maxW: 0.8, maxH: 0.46 }),
+    ],
     title: { tr: 'Metin', en: 'Metin' },
     body: {
       tr: 'Hem yazı, hem taş. Bilinen ilk Türkçe metinlerden bazıları taşa kazındı. Mert Metin, frontend geliştirici.',
