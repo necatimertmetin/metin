@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GROUND_COLOR, GROUND_EMISSIVE, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
 import { createGroundGeometry } from './ground';
 import { createSky } from './sky';
-import { GLYPHS, HOLES_D, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createLeafTexture, createRuneAtlas } from './textures';
+import { GLYPHS, HOLES_D, HOLES_MAX_DEPTH, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createLeafTexture, createRuneAtlas } from './textures';
 import { layStones, type Shape, type StoneSpot } from './shapes';
 import { StoneField, type Pointer } from './stones';
 import { sound } from './sound';
@@ -215,17 +215,32 @@ export class RuinsScene {
     /* pits: the holes stones leave in the ground, boxes seen from inside (only their far walls and floor draw) */
     const pitMat = new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.95, metalness: 0, side: THREE.BackSide });
     pitMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uHoles = { value: this.holes.texture };
+      sh.uniforms.uHoleDepth = { value: this.holes.depthTexture };
+      sh.uniforms.uHolesRect = { value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D) };
+      sh.uniforms.uHoleMax = { value: HOLES_MAX_DEPTH };
+      const vary = 'varying float vShade; varying vec3 vPW; varying vec3 vPN; varying float vTop; varying float vPitDepth;';
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', `#include <common>
-varying float vDepth;`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>
-vDepth = position.y + .5;`);
+        .replace('#include <common>', `#include <common>\n${vary}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\nvShade = position.y + .5;`)
+        .replace('#include <project_vertex>', `#include <project_vertex>
+mat4 pitM = modelMatrix * instanceMatrix;
+vPW = (pitM * vec4(transformed, 1.)).xyz;
+vPN = normalize(mat3(pitM) * normal);
+vTop = (pitM * vec4(0., .5, 0., 1.)).y;
+vPitDepth = vTop - (pitM * vec4(0., -.5, 0., 1.)).y;`);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>
-varying float vDepth;`)
-        /* darker towards the bottom, where little light gets in */
+        .replace('#include <common>', `#include <common>\n${vary}
+uniform sampler2D uHoles; uniform sampler2D uHoleDepth; uniform vec4 uHolesRect; uniform float uHoleMax;
+vec2 holeUV(vec2 xz) { return vec2((xz.x + uHolesRect.x) / uHolesRect.z, 1. - (xz.y - uHolesRect.y) / uHolesRect.w); }`)
+        /* where pits overlap they open into one another: a wall with another hole just beyond it, at least as deep as
+           this point, isn't there, and neither is a floor lying inside a deeper hole. Then darker towards the bottom. */
         .replace('#include <color_fragment>', `#include <color_fragment>
-diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
+if (abs(vPN.y) < .5) {
+  vec2 beyond = holeUV(vPW.xz + vPN.xz * .04);
+  if (texture2D(uHoles, beyond).r > .5 && texture2D(uHoleDepth, beyond).r * uHoleMax >= vTop - vPW.y - .01) discard;
+} else if (texture2D(uHoleDepth, holeUV(vPW.xz)).r * uHoleMax > vPitDepth + .03) discard;
+diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     };
     this.pitMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), pitMat, MAX_PITS);
     this.pitMesh.receiveShadow = true;
@@ -363,7 +378,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
   /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
   private addPit(x: number, y: number, z: number, w: number, d: number, depth: number, angle: number) {
     if (this.pitMesh.count >= MAX_PITS) return;
-    this.holes.add(x, z, w, d, angle);
+    this.holes.add(x, z, w, d, angle, depth);
     /* y is the stone's centre as it lay, flush with the surface; the pit is the room it took up */
     this.m.compose(new THREE.Vector3(x, y, z), this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle), this.s.set(w, depth, d));
     this.pitMesh.setMatrixAt(this.pitMesh.count++, this.m);
