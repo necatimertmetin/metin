@@ -1,33 +1,21 @@
-# Metin
+# 𐰢 Metin
 
-The personal site of Mert Metin, frontend developer. *Metin* is both a name and a word: text, carved in stone.
+**[necatimertmetin.github.io/metin](https://necatimertmetin.github.io/metin/)**
 
-Words and shapes are built from floating stones, each cut with an Old Turkic rune. Strike the stone to begin: the stones
-break out of the ground rock and gather into the word. Move the pointer to light the runes, look up to the sky, where
-four constellations write 𐱅𐰭𐰼𐰃 (Teŋri), hold to drop the stones, scroll to carve the next shape.
+[![Metin](public/og.jpg)](https://necatimertmetin.github.io/metin/)
 
-## Run
+*Metin* hem bir isim, hem bir kelime: yazı. Bilinen ilk Türkçe metinlerden bazıları taşa kazındı.
 
-```sh
-npm install
-npm run dev      # local development
-npm run build    # production build in dist/
-npm run preview  # serve the build
-```
+Karanlıkta tek bir taş bekler. Ona dokununca kayaya çakılır; kaya çatlar, içinden rün işlenmiş taşlar kopup havalanır
+ve bir araya gelip yazıyı kurar. Göğe bakınca dört takımyıldız Göktürk harfleriyle 𐱅𐰭𐰼𐰃 yazar: Teŋri, gök.
+Basılı tutarsan taşlar yere düşer; bırakınca yeniden toplanırlar.
 
-## Where things are
+---
 
-| | |
-|---|---|
-| `src/content.ts` | the scenes, their shapes and texts (TR / EN) |
-| `src/scene/shapes.ts` | turning text, SVG paths or canvas drawings into stone layouts (`stoneText`, `stonePath`, `stoneDraw`) |
-| `src/scene/marks.ts` | ready-made shapes |
-| `src/scene/RuinsScene.ts` | the scene: renderer, lights, camera, input, the opening strike |
-| `src/scene/stones.ts` | how stones move: emerging, flying to shapes, falling |
-| `src/scene/physics.ts` | rigid-body physics for dropped stones (Rapier) |
-| `src/scene/glsl.ts` | the stone and ground shaders |
-| `src/scene/sky.ts` | the night sky, the Milky Way and the rune constellations |
-| `src/scene/sound.ts` | all sound, synthesised with Web Audio |
+*Metin* is a name, and a word: text. Some of the earliest Turkic texts were carved in stone.
 
-Live at **https://necatimertmetin.github.io/metin/**. `npm run deploy` builds the site and publishes it to the `gh-pages` branch
-(GitHub Pages serves that branch). `public/og.jpg` is the link preview image.
+In the dark a single stone waits. Touch it and it strikes the rock; the rock cracks, and stones cut with runes break
+free, rise and gather into words. Look up, and four constellations write 𐱅𐰭𐰼𐰃 in Old Turkic letters: Teŋri, the sky.
+Hold, and the stones fall; let go, and they gather again.
+
+— Mert Metin
