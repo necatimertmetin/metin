@@ -77,7 +77,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .panel-link:hover { text-decoration: underline; }
 .panel-close { position: absolute; top: 12px; right: 14px; width: 32px; height: 32px; font-size: 22px; line-height: 1; color: var(--muted); border-radius: 999px; }
 .panel-close:hover { color: var(--fg); }
-.shell.panel-open .cr { opacity: 0; pointer-events: none; }
+/* at a project's wall the scene's own caption, hint and pebbles go; they come back once the view has returned */
+.shell.panel-open .cr, .shell.panel-open .bl, .shell.panel-open .bc { opacity: 0; pointer-events: none; transition: opacity 0.4s; }
 .cap { transition: opacity 0.5s; }
 .cap.fade { opacity: 0; }
 .cap .idx { color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
