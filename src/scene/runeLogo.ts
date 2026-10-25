@@ -67,7 +67,7 @@ export function createRuneLogo(url: string, color = '#ffffff') {
   img.src = url;
   const swap = changing(runes);
 
-  let t = 0, leave = -1, scatter = 0, ripple = -1;
+  let paintAcc = 1, t = 0, leave = -1, scatter = 0, ripple = -1;
   const light = new THREE.Vector2(S / 2, S / 2), lightWant = new THREE.Vector2(), rippleAt = new THREE.Vector2();
   let lightOn = 0;
 
@@ -92,6 +92,10 @@ export function createRuneLogo(url: string, color = '#ffffff') {
     scatter = leave >= 0 ? Math.min(1, Math.max(0, (leave - 0.55) / 1.2)) : 0;
     const gather = leave >= 0 && leave < 0.55 ? Math.sin((leave / 0.55) * Math.PI) : 0;
     swap(dt);
+    /* painted and sent to the graphics card thirty times a second, not every frame: the letters move slowly */
+    paintAcc += dt;
+    if (paintAcc < 1 / 30) return;
+    paintAcc = 0;
 
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, S, S);

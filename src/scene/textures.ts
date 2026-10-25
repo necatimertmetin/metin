@@ -58,38 +58,6 @@ export function createRuneAtlas() {
   return { texture: tex, redraw: draw };
 }
 
-/** One leaf with veins, transparent around it. */
-export function createLeafTexture() {
-  const [cv, c] = canvas(256, 256);
-  c.translate(128, 128);
-  c.rotate(-Math.PI / 4);
-  const g = c.createLinearGradient(-100, 0, 100, 0);
-  g.addColorStop(0, '#2c4a17');
-  g.addColorStop(0.6, '#4f7a25');
-  g.addColorStop(1, '#93ad48');
-  c.fillStyle = g;
-  c.beginPath();
-  c.moveTo(-110, 0);
-  c.bezierCurveTo(-60, -62, 60, -58, 112, 0);
-  c.bezierCurveTo(60, 58, -60, 62, -110, 0);
-  c.fill();
-  c.strokeStyle = 'rgba(210,230,140,.55)';
-  c.lineWidth = 3.5;
-  c.beginPath();
-  c.moveTo(-104, 0);
-  c.lineTo(108, 0);
-  c.stroke();
-  c.lineWidth = 1.6;
-  for (let v = -80; v < 90; v += 22) {
-    c.beginPath();
-    c.moveTo(v, 0); c.quadraticCurveTo(v + 16, -18, v + 30, -36);
-    c.moveTo(v, 0); c.quadraticCurveTo(v + 16, 18, v + 30, 36);
-    c.stroke();
-  }
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
 
 /** Near-black backdrop with a faint lift in the middle, dithered so the gradient does not band. */
 export function createBackdrop() {

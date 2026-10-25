@@ -12,7 +12,7 @@ import {
   NOISE3,
 } from "./glsl";
 import { createGroundGeometry } from "./ground";
-import { createRealm } from "./realm";
+import { createRealm, type Card } from "./realm";
 import { createSky, type SkyProject } from "./sky";
 import {
   GLYPHS,
@@ -24,7 +24,6 @@ import {
   createBackdrop,
   createEnvironment,
   createHoleMask,
-  createLeafTexture,
   createRuneAtlas,
 } from "./textures";
 import { layStones, type Shape, type StoneSpot } from "./shapes";
@@ -34,6 +33,11 @@ import { growVine } from "./vines";
 import type { Pit, StonePhysics } from "./physics";
 
 const MAX_STONES = 1200;
+
+/* where the six leaves lie in the ivy picture (its pixels, 1024 across): left, top, right, bottom */
+const IVY_LEAVES: [number, number, number, number][] = [
+  [52, 17, 389, 333], [635, 55, 893, 323], [65, 378, 414, 694], [641, 405, 930, 652], [606, 707, 919, 1000], [46, 710, 440, 1011],
+];
 
 /*
  * The grain of real stone (ambientCG's Rock030, CC0), packed in one picture: R its light and dark, G its height, B its
@@ -157,6 +161,9 @@ export class RuinsScene {
   private realmWant = false;
   private realmT = 0;
   private wasThere = false;
+  private realmProject = -1;
+  /* coming back from a wall the view is still turning: the constellations take no pointer until this time */
+  private skyQuietUntil = 0;
   /* where it last looked, kept while what was there says goodbye */
   private lastFocus: THREE.Vector3 | null = null;
   private readonly lookCur = new THREE.Vector3(0, -0.1, 0);
@@ -171,6 +178,9 @@ export class RuinsScene {
   constructor(canvas: HTMLCanvasElement, first: Shape[], opts: RuinsOptions) {
     this.canvas = canvas;
     this.opts = opts;
+    this.realm.useProjects(opts.projects ?? []);
+    /* the walls' shaders are made ready in the background, so the first visit to one doesn't stall */
+    window.setTimeout(() => this.renderer.compile(this.realm.scene, this.realm.camera), 2500);
     this.field = new StoneField(this.reduced);
     /* a stone breaking out of the ground leaves its hole behind */
     this.field.onBreak = (x, y, z, w, d, depth, angle) => {
@@ -361,9 +371,10 @@ export class RuinsScene {
     scene.add(this.stoneMesh);
 
     /* vines ride on the stones: a thin stem of instanced segments, and leaves */
+    /* ivy's stems are woody: brown going green, rough */
     const stemMat = new THREE.MeshStandardMaterial({
-      color: 0x3d4a22,
-      roughness: 0.85,
+      color: 0x45391f,
+      roughness: 0.92,
       metalness: 0,
     });
     this.stemMesh = new THREE.InstancedMesh(
@@ -437,38 +448,64 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`,
     this.pitMesh.count = 0;
     scene.add(this.pitMesh);
 
-    const leafTex = createLeafTexture();
+    /*
+     * real ivy leaves (ambientCG's LeafSet017, CC0): six photographed leaves in one picture; each leaf in the scene
+     * takes one of them, fitted into its square without stretching, stalk down, so it grows out from the stem
+     */
+    const leafTex = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}vine/ivy_color.png`);
+    leafTex.colorSpace = THREE.SRGBColorSpace;
+    leafTex.anisotropy = 4;
+    const leafNormal = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}vine/ivy_normal.jpg`);
+    const leafRects = IVY_LEAVES.map(([x0, y0, x1, y1]) => {
+      const side = Math.max(x1 - x0, y1 - y0), sx = (x0 + x1 - side) / 2, sy = Math.max(0, y1 - side);
+      return new THREE.Vector4(sx / 1024, 1 - (sy + side) / 1024, side / 1024, side / 1024);
+    });
+    const leafUv = (sh: THREE.WebGLProgramParametersWithUniforms) => {
+      sh.uniforms.uLeafRect = { value: leafRects };
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", `#include <common>\nattribute float aCell; uniform vec4 uLeafRect[${IVY_LEAVES.length}];`)
+        .replace("#include <uv_vertex>", `#include <uv_vertex>
+vec4 leafR = uLeafRect[int(aCell)];
+vec2 leafUv = leafR.xy + uv * leafR.zw;
+#ifdef USE_MAP
+vMapUv = leafUv;
+#endif
+#ifdef USE_NORMALMAP
+vNormalMapUv = leafUv;
+#endif`);
+    };
     const leafMat = new THREE.MeshStandardMaterial({
       map: leafTex,
-      alphaTest: 0.45,
+      normalMap: leafNormal,
+      alphaTest: 0.5,
       side: THREE.DoubleSide,
-      roughness: 0.55,
+      roughness: 0.72,
       metalness: 0,
-      envMapIntensity: 0.6,
+      envMapIntensity: 0.4,
     });
-    this.leafMesh = new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(1, 1),
-      leafMat,
-      MAX_LEAVES,
-    );
+    leafMat.onBeforeCompile = leafUv;
+    const leafGeo = new THREE.PlaneGeometry(1, 1);
+    const cells = new Float32Array(MAX_LEAVES);
+    for (let i = 0; i < MAX_LEAVES; i++) cells[i] = Math.floor(Math.random() * IVY_LEAVES.length);
+    leafGeo.setAttribute("aCell", new THREE.InstancedBufferAttribute(cells, 1));
+    this.leafMesh = new THREE.InstancedMesh(leafGeo, leafMat, MAX_LEAVES);
     this.leafMesh.castShadow = this.leafMesh.receiveShadow = true;
-    this.leafMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
+    const leafDepth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
       map: leafTex,
-      alphaTest: 0.45,
+      alphaTest: 0.5,
     });
+    leafDepth.onBeforeCompile = leafUv;
+    this.leafMesh.customDepthMaterial = leafDepth;
     this.leafMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.leafMesh.frustumCulled = false;
+    /* the photographs carry their own colour, deepened for the night: each leaf a little darker or lighter, a touch
+       yellower or bluer */
     const col = new THREE.Color();
-    for (let i = 0; i < MAX_LEAVES; i++)
-      this.leafMesh.setColorAt(
-        i,
-        col.setHSL(
-          0.2 + Math.random() * 0.08,
-          0.45 + Math.random() * 0.25,
-          0.35 + Math.random() * 0.25,
-        ),
-      );
+    for (let i = 0; i < MAX_LEAVES; i++) {
+      const v = 0.42 + Math.random() * 0.25;
+      this.leafMesh.setColorAt(i, col.setRGB(v * (0.7 + Math.random() * 0.15), v, v * (0.55 + Math.random() * 0.15)));
+    }
     this.leafMesh.count = 0;
     scene.add(this.leafMesh);
 
@@ -671,10 +708,17 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`,
     this.sky.focus(project);
     this.focusDir = project >= 0 ? this.sky.gazeAt(project) : null;
     if (this.focusDir) this.lastFocus = this.focusDir;
-    const realm =
-      project >= 0 && this.opts.projects?.[project]?.face === "lito";
+    /* any project opened takes you to its own wall */
+    const realm = project >= 0;
+    if (!realm && this.realmWant) this.skyQuietUntil = this.time + 5;
+    if (realm) this.realmProject = project;
     if (realm !== this.realmWant) sound.whoosh(1.6, 0.6);
     this.realmWant = realm;
+  }
+
+  /** What the open project's tablet says, at its wall. */
+  setCard(card: Card | null) {
+    this.realm.setCard(card);
   }
 
   /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
@@ -786,9 +830,17 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`,
     if (this.pressProject >= 0 || this.openProject >= 0) {
       /* a click opens the constellation pressed on, or anywhere else closes the open one */
       if (Math.hypot(dx, dy) < 14) {
-        /* in Lito's place, a click does not take you back: only the panel's close does */
+        /* at a project's wall, a click does not take you back: only the tablet's close mark does, or it opens the link */
         if (this.realmWant) {
-          /* stay */
+          const what = this.realmT >= 0.5 ? this.realm.hit(this.ndc) : null;
+          if (what === "close") {
+            this.realm.pressClose();
+            this.opts.onProject?.(-1);
+          }
+          else if (what === "link") {
+            const href = this.realm.linkHref();
+            if (href) window.open(href, "_blank", "noopener");
+          }
         } else if (
           /* on the open one itself, a touch for whatever lives there (Lito), not a close */
           this.pressProject >= 0 &&
@@ -1051,15 +1103,19 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`,
     );
     const there = this.realmT >= 0.5;
     this.hoverProject =
-      this.started && this.pointer.has && !there
+      this.started && this.pointer.has && !there && this.time > this.skyQuietUntil
         ? this.sky.pick(this.ray.ray.direction)
         : -1;
     this.canvas.classList.toggle("pick", this.hoverProject >= 0);
-    this.sky.update(
-      dt,
-      this.camera,
-      this.pointer.has ? this.ray.ray.direction : null,
-    );
+    this.sky.hover(this.hoverProject);
+    if (there) this.canvas.classList.toggle("pick", this.pointer.has && !!this.realm.hit(this.ndc));
+    /* at a wall the sky is not seen: it is not worked on either */
+    if (!there)
+      this.sky.update(
+        dt,
+        this.camera,
+        this.pointer.has ? this.ray.ray.direction : null,
+      );
     /* the crossing: the light swells to white and falls away on the other side */
     const flash = Math.max(0, 1 - Math.abs(this.realmT - 0.5) * 2.2);
     this.canvas.style.filter =
@@ -1067,7 +1123,7 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`,
         ? `brightness(${1 + flash ** 2 * 9}) saturate(${1 - flash * 0.6})`
         : "";
     if (there) {
-      if (!this.wasThere) this.realm.enter();
+      if (!this.wasThere) this.realm.enter(this.realmProject);
       this.realm.update(dt, this.ndc, this.time);
       this.renderer.render(this.realm.scene, this.realm.camera);
     } else this.renderer.render(this.scene, this.camera);

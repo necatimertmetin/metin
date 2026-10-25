@@ -57,6 +57,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [project]);
 
+  /* the open project's tablet, cut in its wall, says what the panel says, in the language chosen */
+  useEffect(() => {
+    const p = project >= 0 ? PROJECTS[project] : null;
+    ruins.current?.setCard(p ? { kicker: UI.projects[lang], title: p.name, role: p.role[lang], body: p.body[lang], close: UI.close[lang], link: p.link } : null);
+  }, [project, lang]);
+
   /* the stones move right away; the caption fades out and back in with the new text */
   useEffect(() => {
     if (index !== shown) ruins.current?.show(SCENES[index].shapes, SCENES[index].lookUp);
@@ -106,7 +112,8 @@ export default function App() {
 
       <div className={`shell${started ? ' on' : ''}${open ? ' panel-open' : ''}`}>
       {open && (
-        <aside className="ui panel" role="dialog" aria-label={open.name} key={open.id}>
+        /* the words are cut into a stone tablet in the project's wall; this panel stays for screen readers and the keyboard */
+        <aside className="ui panel in-stone" role="dialog" aria-label={open.name} key={open.id}>
           <button type="button" className="panel-close" aria-label={UI.close[lang]} onClick={() => setProject(-1)}>×</button>
           <div className="mono panel-kicker">{UI.projects[lang]}</div>
           <h2>{open.name}</h2>
