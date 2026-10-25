@@ -211,7 +211,7 @@ void main() {
   /* each cloud its own (uSeed): turned and drawn out its own way, its own grain and twist, some soft and puffed,
      some drawn into filaments, some crossed by dark lanes of dust, the brightest part off the middle */
   float ang = uSeed * 1.7;
-  vec2 sp = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p * vec2(1. + .5 * fract(uSeed * .37), 1. - .3 * fract(uSeed * .61));
+  vec2 sp = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p * vec2(1. + .3 * fract(uSeed * .37), 1. - .2 * fract(uSeed * .61));
   float r2 = length(sp);
   vec3 q = vec3(sp * (1.7 + 1.1 * fract(uSeed * .53)), uTime * .02 + uSeed * 9.);
   float n = fbm3(q + fbm3(q * 1.7 + 3. + uSeed) * (.55 + .6 * fract(uSeed * .29)));
@@ -220,9 +220,9 @@ void main() {
   float wisps = smoothstep(.22 - uOpen * .08, .8, n) * (1. - smoothstep(.2, 1., r2)) * (1. - lanes);
   vec2 off = (vec2(fract(uSeed * .13), fract(uSeed * .19)) - .5) * .35;
   float core = exp(-dot(p - off, p - off) * (2.4 + 1.6 * fract(uSeed * .83)));
-  float a = (wisps + core * (.5 - uOpen * .3)) * (.3 + uLit * .7) * uFade * uShow;
+  float a = (wisps + core * (.45 - uOpen * .3)) * (.16 + uLit * .64) * uFade * uShow;
   vec3 col = mix(uColor * .6, uColor + .2, smoothstep(.45, .9, n));
-  vec3 rgb = col * a * 1.5;
+  vec3 rgb = col * a * 1.05;
 
   /* the logo, about half the cloud, wavering like gas until it has fully formed */
   float reveal = smoothstep(.3, 1., uOpen);
@@ -458,7 +458,7 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
       fragmentShader: NEBULA_FRAG,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide,
     });
-    const size = R * Math.tan(THREE.MathUtils.degToRad(k.size * 2.6));
+    const size = R * Math.tan(THREE.MathUtils.degToRad(k.size * 2));
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
     mesh.position.copy(onSky(k.az, k.el)).multiplyScalar(R * 0.99);
     mesh.lookAt(0, 0, 0);

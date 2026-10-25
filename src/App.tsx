@@ -37,6 +37,7 @@ export default function App() {
           color: p.color, face: p.face,
         })),
         onProject: setProject,
+        site: SCENES[0].monuments,
       });
     } catch {
       setNoGL(true);
@@ -65,7 +66,7 @@ export default function App() {
 
   /* the stones move right away; the caption fades out and back in with the new text */
   useEffect(() => {
-    if (index !== shown) ruins.current?.show(SCENES[index].shapes, SCENES[index].lookUp);
+    if (index !== shown) ruins.current?.show(SCENES[index].shapes, SCENES[index].lookUp, SCENES[index].monuments);
     const t = window.setTimeout(() => setShown(index), 260);
     return () => clearTimeout(t);
   }, [index, shown]);

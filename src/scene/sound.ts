@@ -439,6 +439,78 @@ export const sound = {
   },
 
   /**
+   * A pillar heaving up out of the earth over `dur` seconds: not stone breaking but a great mass dragged up through the
+   * ground. The earth groaning under it, deepest at the start, when it moves fastest; the stone scraping up through the
+   * soil in slow uneven drags (it sticks and slips); soil and grit pouring off its shoulders, thick at first and
+   * thinning; now and then a heavy clod falling back. `big` for the two great pillars: deeper, longer, louder.
+   */
+  emerge(dur: number, pan = 0, big = false) {
+    if (!live()) return;
+    const c = ctx!, t = c.currentTime, end = t + dur;
+    const out = c.createGain(), p = c.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, pan)) * 0.6;
+    out.gain.value = big ? 1.5 : 0.85;
+    out.connect(p).connect(master!);
+    if (hall) { const send = c.createGain(); send.gain.value = 0.3; out.connect(send).connect(hall); }
+
+    /* the earth: slowed brown noise under a low lowpass, swelling fast and easing off as the pillar slows */
+    const deep = source(c, true), dl = c.createBiquadFilter(), dg = c.createGain();
+    dl.type = 'lowpass'; dl.Q.value = 0.7;
+    dl.frequency.setValueAtTime(big ? 70 : 95, t);
+    dl.frequency.linearRampToValueAtTime(big ? 120 : 150, t + dur * 0.3);
+    dl.frequency.exponentialRampToValueAtTime(50, end + 0.6);
+    dg.gain.setValueAtTime(0.0001, t);
+    dg.gain.exponentialRampToValueAtTime(big ? 1.1 : 0.75, t + 0.35);
+    dg.gain.exponentialRampToValueAtTime(0.0001, end + 0.8);
+    deep.playbackRate.value = big ? 0.28 : 0.36;
+    deep.connect(dl).connect(dg).connect(out);
+    deep.start(t, Math.random() * 2);
+    deep.stop(end + 0.9);
+
+    /* the drag: a band of noise moving as it scrapes, its loudness in uneven pulls (stick, slip) */
+    const drag = source(c, true), bp = c.createBiquadFilter(), sg = c.createGain();
+    bp.type = 'bandpass'; bp.Q.value = 1.1;
+    bp.frequency.setValueAtTime(big ? 190 : 260, t);
+    bp.frequency.linearRampToValueAtTime(big ? 300 : 420, t + dur * 0.5);
+    bp.frequency.linearRampToValueAtTime(big ? 170 : 230, end);
+    sg.gain.setValueAtTime(0.0001, t);
+    let at = t + 0.05;
+    while (at < end - 0.1) {
+      const fade = 1 - (at - t) / dur;
+      sg.gain.linearRampToValueAtTime((0.12 + Math.random() * 0.3) * (0.3 + 0.7 * fade), at);
+      at += 0.12 + Math.random() * 0.22;
+    }
+    sg.gain.linearRampToValueAtTime(0.0001, end + 0.1);
+    drag.playbackRate.value = 0.8 + Math.random() * 0.2;
+    drag.connect(bp).connect(sg).connect(out);
+    drag.start(t, Math.random() * 2);
+    drag.stop(end + 0.2);
+
+    /* soil and grit pouring off: a soft patter of tiny bursts, dense at first */
+    const grit = c.createBiquadFilter();
+    grit.type = 'lowpass'; grit.frequency.value = big ? 1800 : 2400;
+    grit.connect(out);
+    const n = Math.round(dur * (big ? 55 : 40));
+    for (let i = 0; i < n; i++) {
+      const k = Math.random() ** 1.8, when = t + 0.1 + k * (dur + 0.4);
+      const s = source(c, false, true), f = c.createBiquadFilter(), g = c.createGain();
+      f.type = 'bandpass'; f.frequency.value = 500 + Math.random() * 1600; f.Q.value = 1.4;
+      const len = 0.008 + Math.random() * 0.025;
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime((0.02 + Math.random() * 0.05) * (1 - k * 0.7), when + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + len);
+      s.connect(f).connect(g).connect(grit);
+      s.start(when, Math.random() * 1.9, len + 0.01);
+    }
+
+    /* clods falling back: a few dull low thumps */
+    for (let i = 0; i < (big ? 6 : 3); i++) {
+      const when = t + 0.3 + Math.random() * dur;
+      rumble(c, out, when, 260, 70, 0.12 + Math.random() * 0.12, 0.006, 0.18 + Math.random() * 0.12, 0.6);
+    }
+  },
+
+  /**
    * An ancient seal giving way, over `dur` seconds and then at its breaking: not a stone's sound but an awakening.
    * Pressure gathering from far below (a drone on D, felt more than heard, steady, nothing in it that repeats), and
    * the stone cracking under the strain more and more often. Then it breaks (the caller sounds the stone breaking,

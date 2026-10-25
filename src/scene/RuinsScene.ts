@@ -12,6 +12,7 @@ import {
   NOISE3,
 } from "./glsl";
 import { createGroundGeometry } from "./ground";
+import { createEnclosure, type Site } from "./gobekli";
 import { createRealm, type Card } from "./realm";
 import { createSky, type SkyProject } from "./sky";
 import {
@@ -69,6 +70,8 @@ export type RuinsOptions = {
   projects?: SkyProject[];
   /** a project constellation was touched (its index), or the open one closed (-1) */
   onProject?: (project: number) => void;
+  /** the monuments the first scene raises, if any */
+  site?: Site;
 };
 
 /**
@@ -171,6 +174,10 @@ export class RuinsScene {
   private readonly gazeWant = new THREE.Vector2();
   private wheelLock = 0;
   private readonly camBase = new THREE.Vector3(1.6, 0.9, CAM_Z);
+  /* Göbeklitepe's pillars and the Orkhon steles, each raised out of the ground in its own scene */
+  private readonly monuments = new Map<Site, ReturnType<typeof createEnclosure>>();
+  private site: Site | undefined;
+  private lastGrind = 0;
   private readonly look = new THREE.Vector3(0, -0.1, 0);
 
   private readonly canvas: HTMLCanvasElement;
@@ -190,6 +197,7 @@ export class RuinsScene {
     this.field.onLand = (strength, x, size) => this.land(strength, x, size);
     this.field.onHome = (x) => sound.tick(x / this.hw);
     this.sequence = first;
+    this.site = opts.site;
     const r = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -280,6 +288,26 @@ export class RuinsScene {
     this.floor = new THREE.Mesh(createGroundGeometry(), groundMat);
     this.floor.receiveShadow = true;
     scene.add(this.floor);
+
+    /* Göbeklitepe's pillars and the Orkhon steles, under the ground until their scene comes */
+    const events = {
+      /* each heaves up out of the earth (the ring's ones quieter, and not two at once, or it would be a din) */
+      onGrind: (x: number, big: boolean, dur: number) => {
+        if (!big && this.time - this.lastGrind < 0.3) return;
+        this.lastGrind = this.time;
+        sound.emerge(dur, x / this.hw, big);
+      },
+      /* and settles with a boulder's weight; the two great ones shake the view */
+      onLand: (x: number, big: boolean) => {
+        if (big) this.land(1, x, this.hh * 0.4);
+        else sound.hit(0.45, x / this.hw, 0.85);
+      },
+    };
+    for (const site of ["gobekli", "orkhon"] as const) {
+      const m = createEnclosure(this.uni.uDetail, this.uni.uRune, this.uni.uTime, events, site);
+      this.monuments.set(site, m);
+      scene.add(m.group);
+    }
 
     /* the night sky over it all */
     this.sky = createSky(this.uni.uRune, opts.projects ?? []);
@@ -546,8 +574,10 @@ vNormalMapUv = leafUv;
   }
 
   /** Float the stones into a shape; several shapes take turns every few seconds. */
-  show(shapes: Shape[], lookUp = false) {
+  show(shapes: Shape[], lookUp = false, site?: Site) {
     this.lookUp = lookUp;
+    this.site = site;
+    if (this.started) this.monuments.forEach((m, s) => m.set(s === site));
     this.sequence = shapes;
     this.seqIndex = 0;
     this.seqTimer = 0;
@@ -568,6 +598,8 @@ vNormalMapUv = leafUv;
     sound.unlock();
     this.sky.show();
     this.opts.onStart();
+    const site = this.site;
+    if (site) window.setTimeout(() => this.monuments.get(site)?.set(true), 1200);
     const st = this.field.stones[0];
     if (!st) {
       this.assign(this.sequence[this.seqIndex], true);
@@ -769,6 +801,10 @@ vNormalMapUv = leafUv;
     this.realm.resize(w / h);
     this.baseFov = this.camera.fov = w / h < 0.8 ? 46 : 30;
     this.camera.updateProjectionMatrix();
+    const px =
+      (h * Math.min(window.devicePixelRatio || 1, 1.5)) /
+      (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
+    this.monuments.forEach((m) => m.resize(px));
     this.hh =
       Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * CAM_Z * 0.82;
     this.hw = this.hh * this.camera.aspect;
@@ -1096,6 +1132,7 @@ vNormalMapUv = leafUv;
       this.camera.updateProjectionMatrix();
     }
     this.camera.updateMatrixWorld();
+    this.monuments.forEach((m) => m.update(dt, this.hh, this.camera, this.ndc, this.pointer.has, this.reduced));
     this.realmT = THREE.MathUtils.clamp(
       this.realmT + (this.realmWant ? dt : -dt) / 1.6,
       0,

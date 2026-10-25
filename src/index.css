@@ -37,8 +37,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .shell:not(.on) .ui { opacity: 0; pointer-events: none; transition: none; }
 
 /* the opening stone is drawn in the scene; this is the button over it, and its line of text beneath */
-.gate { position: fixed; left: 50%; top: 46%; width: 15vh; height: 16vh; transform: translate(-50%, -50%); z-index: 6; border-radius: 22px; cursor: pointer; }
-.gate-hint { position: fixed; left: 50%; top: calc(46% + 12vh); transform: translateX(-50%); z-index: 6; text-align: center; white-space: nowrap; pointer-events: none; color: var(--muted); transition: opacity 0.8s; }
+.gate { position: fixed; left: 50%; top: 46%; width: 21vh; height: 22vh; transform: translate(-50%, -50%); z-index: 6; border-radius: 22px; cursor: pointer; }
+.gate-hint { position: fixed; left: 50%; top: calc(46% + 15vh); transform: translateX(-50%); z-index: 6; text-align: center; white-space: nowrap; pointer-events: none; color: var(--muted); transition: opacity 0.8s; }
 .gate-hint b { display: block; color: var(--fg); font-family: var(--mono); font-weight: 500; font-size: 13px; letter-spacing: 0.45em; margin-bottom: 8px; padding-left: 0.45em; }
 .gate.gone, .gate-hint.gone { opacity: 0; pointer-events: none; }
 .tl { top: max(20px, env(safe-area-inset-top)); left: max(22px, env(safe-area-inset-left)); }
