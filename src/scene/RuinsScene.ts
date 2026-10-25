@@ -628,7 +628,9 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     this.field.shake = Math.max(0, this.field.shake - dt * 0.5);
     const shake = this.field.shake, par = this.reduced ? 0 : 1;
     /* in the projects scene the gaze leans up, towards the constellations */
-    this.gazeWant.set(this.ndc.x, Math.min(1.35, this.ndc.y + (this.lookUp ? 1 : 0)));
+    /* and the pointer only nudges it there, so the constellations hold still enough to be aimed at */
+    if (this.lookUp) this.gazeWant.set(this.ndc.x * 0.25, 1 + this.ndc.y * 0.25);
+    else this.gazeWant.copy(this.ndc);
     this.gaze.lerp(this.gazeWant, Math.min(1, dt * 3));
     this.camera.position.set(
       /* the shake is a smooth wobble, not a fresh random jolt every frame, so the far sky doesn't flicker */
