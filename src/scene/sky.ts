@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { createLito } from './lito';
+import { createRuneLogo } from './runeLogo';
+import { NEIGHBOURS, thin } from './skeleton';
 import { NOISE3 } from './glsl';
 import { GLYPHS, RUNE_FONT } from './textures';
 
@@ -13,14 +16,15 @@ import { GLYPHS, RUNE_FONT } from './textures';
 const R = 70;
 /*
  * runes for the constellations, and where they hang: azimuth (0 = straight ahead, +right) and elevation, in degrees.
- * The camera sees only about 11° above the horizon on a wide screen, so they hang low; and it looks about 6.5° to the
- * left of straight ahead (its three-quarter view), so the word is centred there.
+ * Teŋri hangs above everything, over the projects and the crescent and star, seen when the view leans up to the sky:
+ * its letters side by side as one word, read right to left as in the inscriptions, centred over the crescent (the
+ * camera looks about 6.5° to the left of straight ahead, its three-quarter view).
  */
 const CONSTELLATIONS: { glyph: number; az: number; el: number; size: number }[] = [
-  { glyph: 0x45, az: 12.5, el: 6.4, size: 5.4 },
-  { glyph: 0x2d, az: 0, el: 7.2, size: 5 },
-  { glyph: 0x3c, az: -13, el: 6.9, size: 5.2 },
-  { glyph: 0x03, az: -25.5, el: 6.2, size: 5 },
+  { glyph: 0x45, az: 2.2, el: 22.8, size: 5 },
+  { glyph: 0x2d, az: -3.6, el: 22.8, size: 5 },
+  { glyph: 0x3c, az: -9.4, el: 22.8, size: 5 },
+  { glyph: 0x03, az: -15.2, el: 22.8, size: 5 },
 ];
 
 const SKY_FRAG = /* glsl */ `
@@ -41,8 +45,9 @@ float starLayer(vec3 d, float scale, float density, float size) {
 void main() {
   vec3 d = normalize(vDir);
   float el = d.y;
-  /* deep night, a little less dark towards the horizon where it meets the fog */
+  /* deep night, a little less dark towards the horizon; and down at the horizon the haze the ground fades into */
   vec3 col = mix(vec3(.014, .016, .021), vec3(.003, .0035, .006), smoothstep(-.06, .25, el));
+  col = mix(col, vec3(.021, .023, .032), exp(-max(el, 0.) * 9.) * smoothstep(-.12, -.02, el) + (1. - smoothstep(-.12, -.02, el)));
   /* the Milky Way, corner to corner across the sky: violet dusty clouds, a warmer glow towards its core low on the right,
      dark lanes of dust down its middle, and a wide faint haze around it all; it wanders a little, as the real one does */
   float bd = dot(d, uBandN) + (fbm3(d * 3. + 2.) - .5) * .08;
@@ -56,7 +61,7 @@ void main() {
   /* stars: many faint ones, fewer brighter ones, and a dense dust of tiny ones along the band; none down in the haze */
   float stars = starLayer(d, 260., .05 + band * .2, .07) * .45 + starLayer(d, 520., band * .35 * (1. - lanes), .07) * .4
               + starLayer(d, 90., .03, .06) * .9;
-  col += vec3(.85, .88, 1.) * stars * smoothstep(-.07, .03, el);
+  col += vec3(.85, .88, 1.) * stars * smoothstep(.0, .14, el);
   gl_FragColor = vec4(col, 1.);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -80,27 +85,8 @@ function runeGraph(glyph: string) {
   const img = c.getImageData(0, 0, S, S).data;
   const on = new Uint8Array(S * S);
   for (let i = 0; i < S * S; i++) on[i] = img[i * 4 + 3] > 110 ? 1 : 0;
-  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= S || y >= S ? 0 : on[y * S + x]);
-  /* Zhang-Suen thinning */
-  const N = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const pass of [0, 1]) {
-      const kill: number[] = [];
-      for (let y = 1; y < S - 1; y++) for (let x = 1; x < S - 1; x++) {
-        if (!on[y * S + x]) continue;
-        const v = N.map(([dx, dy]) => at(x + dx, y + dy));
-        const b = v.reduce((a, q) => a + q, 0);
-        let t = 0;
-        for (let k = 0; k < 8; k++) if (!v[k] && v[(k + 1) % 8]) t++;
-        const [p2, , p4, , p6, , p8] = v;
-        const ok = pass === 0 ? !(p2 && p4 && p6) && !(p4 && p6 && p8) : !(p2 && p4 && p8) && !(p2 && p6 && p8);
-        if (b >= 2 && b <= 6 && t === 1 && ok) kill.push(y * S + x);
-      }
-      for (const i of kill) on[i] = 0;
-      if (kill.length) changed = true;
-    }
-  }
+  thin(on, S, S);
+  const N = NEIGHBOURS;
   /* trace the skeleton: nodes are ends and joints, strokes run between them */
   const nb = (i: number) => N.map(([dx, dy]) => (i % S + dx) + (Math.floor(i / S) + dy) * S)
     .filter((j) => j >= 0 && j < S * S && Math.abs((j % S) - (i % S)) <= 1 && on[j]);
@@ -206,7 +192,56 @@ function onSky(az: number, el: number, x = 0, y = 0) {
 }
 
 /** A project's constellation in the upper sky, to click: its initial rune, where it hangs, and the name it writes. */
-export type SkyProject = { glyph: number; az: number; el: number; name: string; logo?: string };
+export type SkyProject = { glyph: number; az: number; el: number; name: string; logo?: string; color?: string; face?: 'lito' };
+
+/*
+ * a nebula: soft, uneven cloud of colour, brighter in the middle and fading out to nothing at the edge. Opened
+ * (uOpen), it swells and thickens, and the project's logo condenses out of it from the middle outwards, a glowing
+ * silhouette with its own light where the logo is bright (a face on a screen) and a halo around it
+ */
+const NEBULA_FRAG = /* glsl */ `
+${NOISE3}
+uniform vec3 uColor; uniform float uLit; uniform float uShow; uniform float uTime;
+uniform float uOpen; uniform float uFade; uniform sampler2D uLogo; uniform float uAspect; uniform float uHasLogo;
+varying vec2 vUv;
+float logoA(vec2 lp) { return all(greaterThan(lp, vec2(0.))) && all(lessThan(lp, vec2(1.))) ? texture2D(uLogo, lp).a : 0.; }
+void main() {
+  vec2 p = vUv * 2. - 1.;
+  float r = length(p);
+  vec3 q = vec3(p * 2.2, uTime * .02);
+  float n = fbm3(q + fbm3(q * 1.7 + 3.) * .8);
+  float wisps = smoothstep(.22 - uOpen * .08, .8, n) * (1. - smoothstep(.2, 1., r));
+  float core = exp(-r * r * 3.);
+  float a = (wisps + core * (.5 - uOpen * .3)) * (.3 + uLit * .7) * uFade * uShow;
+  vec3 col = mix(uColor * .6, uColor + .2, smoothstep(.45, .9, n));
+  vec3 rgb = col * a * 1.5;
+
+  /* the logo, about half the cloud, wavering like gas until it has fully formed */
+  float reveal = smoothstep(.3, 1., uOpen);
+  vec2 lp = (vUv - .5) / .48;
+  lp.x /= uAspect;
+  lp += .5 + (vec2(n, fbm3(q + 7.)) - .5) * .05 * (1. - reveal);
+  vec4 L = texture2D(uLogo, lp);
+  float body = logoA(lp);
+  float halo = 0.;
+  for (int i = 0; i < 12; i++) {
+    float t = float(i) * .5236;
+    halo += logoA(lp + vec2(cos(t), sin(t)) * (.025 + .02 * fract(float(i) * .618)));
+  }
+  halo /= 12.;
+  float rr = length(lp - .5) * 1.3 + (n - .5) * .6;
+  float show = clamp((reveal * 1.9 - .2 - rr) / .3, 0., 1.) * uHasLogo * uShow;
+  float lum = dot(L.rgb, vec3(.3, .59, .11));
+  float shimmer = .88 + .12 * sin(uTime * 1.7 + n * 9.);
+  /* made of the same gas: patchy, thinner where the cloud is thin, brightest at its own light */
+  float gas = .55 + .6 * smoothstep(.3, .8, fbm3(q * 2.5 + 11.));
+  vec3 logoCol = mix(uColor, L.rgb, .7) * (.3 + lum * 1.6) * shimmer * gas;
+  /* the cloud thins behind it, so what is dark in the logo (Lito's glass) reads dark */
+  rgb *= 1. - body * show * .45;
+  rgb += logoCol * body * show + uColor * halo * (1. - body) * show * .3;
+  gl_FragColor = vec4(rgb, a + (body + halo * .5) * show);
+}
+`;
 
 /** Sample a word into points (about unit height, centred), for writing it in stars. */
 function wordPoints(word: string) {
@@ -306,18 +341,20 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
   const starMat = new THREE.ShaderMaterial({
     uniforms: { uRune, uShow, uDim, uFocus: { value: -1 }, uLit: { value: lit.map((l) => l.value) } },
     vertexShader: /* glsl */ `
-      attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim;
-      varying float vLit;
+      attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; uniform float uVanish;
+      varying float vLit; varying float vMelt;
       void main() {
-        vLit = uLit[int(aK)] * (abs(aK - uFocus) < .5 ? 1. : 1. - uDim);
+        float mine = abs(aK - uFocus) < .5 ? 1. : 0.;
+        vLit = uLit[int(aK)] * (mine > .5 ? 1. : 1. - uDim);
+        vMelt = mine * uVanish;
         gl_PointSize = 5. + vLit * 3.;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uRune; uniform float uShow; uniform float uDim; varying float vLit;
+      uniform vec3 uRune; uniform float uShow; uniform float uDim; varying float vLit; varying float vMelt;
       void main() {
         float d = length(gl_PointCoord - .5);
-        float a = smoothstep(.5, .05, d) * (.8 + vLit * .2) * uShow * (1. - uDim * .55 * (1. - vLit));
+        float a = smoothstep(.5, .05, d) * (.8 + vLit * .2) * uShow * (1. - uDim * .55 * (1. - vLit)) * (1. - vMelt * .9);
         gl_FragColor = vec4(mix(vec3(.92, .95, 1.), uRune * 1.4 + .35, .35 + vLit * .65) * a, a);
       }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
@@ -327,7 +364,7 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     vertexShader: `attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; varying float vLit; varying float vMine;
       void main() { vMine = abs(aK - uFocus) < .5 ? 1. : 0.; vLit = uLit[int(aK)] * (vMine > .5 ? 1. : 1. - uDim); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
     /* always faintly drawn, bright when lit; while one is open the others fade */
-    fragmentShader: 'uniform vec3 uRune; uniform float uShow; uniform float uDim; varying float vLit; varying float vMine; void main() { float a = (.42 + vLit * .58) * uShow * mix(1. - uDim * .7, 1., vMine); gl_FragColor = vec4(uRune * a, a); }',
+    fragmentShader: 'uniform vec3 uRune; uniform float uShow; uniform float uDim; uniform float uVanish; varying float vLit; varying float vMine; void main() { float a = (.42 + vLit * .58) * uShow * mix(1. - uDim * .7, 1. - uVanish, vMine); gl_FragColor = vec4(uRune * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const stars = new THREE.Points(new THREE.BufferGeometry(), starMat);
@@ -394,6 +431,38 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
   let meteorT = -1, meteorNext = 20 + Math.random() * 30;
   const mFrom = new THREE.Vector3(), mDir = new THREE.Vector3();
 
+  /* behind each project with a colour of its own, a nebula of that colour, waking as the pointer comes near */
+  const nebulae = projects.map((p, i) => {
+    if (!p.color) return null;
+    const ki = ALL.findIndex((k) => k.project === i), k = ALL[ki];
+    const uniforms = {
+      uColor: { value: new THREE.Color(p.color) }, uLit: { value: 0 }, uShow, uTime,
+      uOpen: { value: 0 }, uFade: { value: 1 }, uLogo: { value: null as THREE.Texture | null }, uAspect: { value: 1 }, uHasLogo: { value: 0 },
+    };
+    /* what comes alive in the nebula, drawn afresh every frame: Lito's face, or the logo written in letters */
+    const face = p.face === 'lito' ? createLito() : p.logo ? createRuneLogo(p.logo, p.color) : null;
+    if (face) { uniforms.uLogo.value = face.texture; uniforms.uHasLogo.value = 1; }
+    const mat = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+      fragmentShader: NEBULA_FRAG,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide,
+    });
+    const size = R * Math.tan(THREE.MathUtils.degToRad(k.size * 2.6));
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+    mesh.position.copy(onSky(k.az, k.el)).multiplyScalar(R * 0.99);
+    mesh.lookAt(0, 0, 0);
+    mesh.renderOrder = -9.5;
+    group.add(mesh);
+    const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(mesh.quaternion), ay = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion);
+    return { ki, mat, mesh, face, ax, ay, span: size / (R * 0.99) };
+  });
+  const rel = new THREE.Vector2();
+  /* while a nebula is open, its constellation melts into it */
+  const uVanish = { value: 0 };
+  starMat.uniforms.uVanish = uVanish;
+  lineMat.uniforms.uVanish = uVanish;
+
   /* a project's name, written in stars that fly out of its constellation and settle beneath it */
   const nameMat = new THREE.ShaderMaterial({
     uniforms: { uRune, uT: { value: 0 }, uFade: { value: 0 } },
@@ -458,6 +527,29 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
       starMat.uniforms.uLit.value[i] = lit[i].value;
     });
     uDim.value += ((focused >= 0 ? 1 : 0) - uDim.value) * Math.min(1, dt * 2);
+    /* an open nebula takes about two seconds to swell and give up its logo, and closes quicker */
+    uVanish.value = 0;
+    nebulae.forEach((n) => {
+      if (!n) return;
+      const u = n.mat.uniforms, want = n.ki === focused ? 1 : 0;
+      /* a face saying goodbye holds its cloud open until it has gone */
+      const hold = !want && !!n.face?.leaving();
+      /* while another project is open, the other clouds fall back */
+      u.uFade.value = want || hold ? 1 : 1 - uDim.value * 0.8;
+      if (!hold) u.uOpen.value = want ? Math.min(1, u.uOpen.value + dt * 0.5) : Math.max(0, u.uOpen.value - dt * 0.9);
+      const o = u.uOpen.value, e = o * o * (3 - 2 * o);
+      u.uLit.value = Math.max(lit[n.ki].value, e);
+      n.mesh.scale.setScalar(1 + e * 0.5);
+      if (n.face) {
+        if (o > 0) {
+          /* where the pointer is across the face (the logo is .48 of the cloud, the head about .9 of the logo) */
+          const half = 0.24 * n.span * (1 + e * 0.5);
+          const p = pointerDir ? rel.set(pointerDir.dot(n.ax) / half, pointerDir.dot(n.ay) / half) : null;
+          n.face.update(dt, p, !!p && want === 1 && p.length() < 0.85);
+        } else n.face.reset();
+      }
+      uVanish.value = Math.max(uVanish.value, Math.min(1, o * 2));
+    });
     nameMat.uniforms.uT.value += dt;
     nameMat.uniforms.uFade.value += (nameTarget - nameMat.uniforms.uFade.value) * Math.min(1, dt * (nameTarget ? 2 : 4));
     /* shooting star */
@@ -492,17 +584,40 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
 
   /** Open a project's constellation (it shines and writes its name; the rest dim), or close it with -1. */
   const focus = (project: number) => {
+    const was = focused;
     focused = project < 0 ? -1 : ALL.findIndex((k) => k.project === project);
-    starMat.uniforms.uFocus.value = focused;
-    if (focused >= 0) { void writeName(focused); nameTarget = 1; } else nameTarget = 0;
+    /* closing keeps the last one in focus a moment, so its stars come back out of the nebula instead of popping in */
+    starMat.uniforms.uFocus.value = focused >= 0 ? focused : was;
+    nebulae.forEach((n) => {
+      if (!n?.face) return;
+      if (n.ki === focused) n.face.stay();
+      else if (n.ki === was) n.face.farewell();
+    });
+    /* a project with a nebula shows its logo in the cloud instead of writing it in stars */
+    if (focused >= 0 && !projects[project]?.color) { void writeName(focused); nameTarget = 1; } else nameTarget = 0;
   };
+
+  /** A touch on the open project: true when something there answers it (Lito cheers). */
+  const poke = () => {
+    const n = nebulae.find((m) => m && m.ki === focused);
+    if (!n?.face) return false;
+    n.face.poke();
+    return true;
+  };
+
+  /** A face is still saying goodbye: the camera stays on it. */
+  const leaving = () => nebulae.some((n) => !!n?.face?.leaving());
+
+  /** How far a nebula is open (0 to 1): the camera leans in on it. */
+  const opened = () => nebulae.reduce((m, n) => Math.max(m, n ? n.mat.uniforms.uOpen.value : 0), 0);
 
   /** Where to look to see a project's constellation and the name under it. */
   const gazeAt = (project: number) => {
     const k = ALL.find((c) => c.project === project);
-    /* a little to the right of it, so it sits left of the panel that opens on the right */
+    /* a little to the right of it, so it sits left of the panel that opens on the right; a nebula, at its middle */
+    if (k && projects[project]?.color) return onSky(k.az + 6, k.el);
     return k ? onSky(k.az + 8, k.el - k.size * 0.55) : null;
   };
 
-  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, focus, gazeAt };
+  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, focus, gazeAt, opened, poke, leaving };
 }

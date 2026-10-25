@@ -1,20 +1,57 @@
-import * as THREE from 'three';
-import { GROUND_COLOR, GROUND_EMISSIVE, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
-import { createGroundGeometry } from './ground';
-import { createSky, type SkyProject } from './sky';
-import { GLYPHS, HOLES_D, HOLES_MAX_DEPTH, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createLeafTexture, createRuneAtlas } from './textures';
-import { layStones, type Shape, type StoneSpot } from './shapes';
-import { StoneField, type Pointer } from './stones';
-import { sound } from './sound';
-import { growVine } from './vines';
-import type { StonePhysics } from './physics';
+import * as THREE from "three";
+import {
+  GROUND_COLOR,
+  GROUND_EMISSIVE,
+  GROUND_FN,
+  GROUND_RELIEF,
+  STONE_COLOR,
+  STONE_EMISSIVE,
+  STONE_RELIEF,
+  STONE_SHAPE,
+  STONE_VERTEX,
+  NOISE3,
+} from "./glsl";
+import { createGroundGeometry } from "./ground";
+import { createRealm } from "./realm";
+import { createSky, type SkyProject } from "./sky";
+import {
+  GLYPHS,
+  HOLES_D,
+  HOLES_MAX_DEPTH,
+  HOLES_W,
+  HOLES_Z0,
+  RUNE_FONT,
+  createBackdrop,
+  createEnvironment,
+  createHoleMask,
+  createLeafTexture,
+  createRuneAtlas,
+} from "./textures";
+import { layStones, type Shape, type StoneSpot } from "./shapes";
+import { StoneField, type Pointer } from "./stones";
+import { sound } from "./sound";
+import { growVine } from "./vines";
+import type { Pit, StonePhysics } from "./physics";
 
 const MAX_STONES = 1200;
+
+/*
+ * The grain of real stone (ambientCG's Rock030, CC0), packed in one picture: R its light and dark, G its height, B its
+ * roughness. The stones take only their texture from it; their colour stays their own.
+ */
+function loadDetail() {
+  const t = new THREE.TextureLoader().load(
+    `${import.meta.env.BASE_URL}stone/rock030_detail.jpg`,
+  );
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  return t;
+}
 const MAX_LEAVES = 6000;
 const MAX_STEMS = 16000;
 const MAX_PITS = 2400;
 /** the rune and crack light when a shape names no colour: gök (sky) turquoise */
-const RUNE_COLOR = '#7cf4ea';
+const RUNE_COLOR = "#7cf4ea";
 const CAM_Z = 14;
 /* three's lights are physically based; the look was tuned on the old "artist" scale, which is π lower */
 const PI = Math.PI;
@@ -62,10 +99,13 @@ export class RuinsScene {
     /** how charged the opening stone's rune is as it rises to strike, 0 to 1 */
     uGate: { value: 0 },
     uRune: { value: new THREE.Color(RUNE_COLOR) },
+    uDetail: { value: loadDetail() },
   };
   /** the rune colour the current shape asks for; `uRune` eases towards it */
   private readonly runeTarget = new THREE.Color(RUNE_COLOR);
-  private readonly reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private readonly reduced = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
   private readonly opts: RuinsOptions;
 
   private hw = 1;
@@ -94,6 +134,11 @@ export class RuinsScene {
   private ndc = new THREE.Vector2();
   /** where the camera is looking, easing after the pointer */
   private readonly gaze = new THREE.Vector2();
+  /* the jolt a landing boulder gives the view, and how fast it is moving; a spring brings it back */
+  private readonly kick = new THREE.Vector2();
+  private readonly kickV = new THREE.Vector2();
+  /* every pit opened in the ground, for the physics */
+  private readonly pits: Pit[] = [];
   private press: { x: number; y: number; timer: number } | null = null;
   /** the scene leans the camera up towards the sky (the projects scene) */
   private lookUp = false;
@@ -103,6 +148,17 @@ export class RuinsScene {
   private openProject = -1;
   /** where the camera turns to see the open project, and where it is looking now (easing between) */
   private focusDir: THREE.Vector3 | null = null;
+  private baseFov = 30;
+  /*
+   * Lito's own place, a wall of rock (a trial): opening Lito leans into its nebula, and in a flash of light the view is
+   * there instead; closing comes back the same way. 0 is here, 1 is there, the flash at the middle.
+   */
+  private readonly realm = createRealm(this.uni.uRunes);
+  private realmWant = false;
+  private realmT = 0;
+  private wasThere = false;
+  /* where it last looked, kept while what was there says goodbye */
+  private lastFocus: THREE.Vector3 | null = null;
   private readonly lookCur = new THREE.Vector3(0, -0.1, 0);
   private readonly lookWant = new THREE.Vector3();
   private readonly gazeWant = new THREE.Vector2();
@@ -117,11 +173,18 @@ export class RuinsScene {
     this.opts = opts;
     this.field = new StoneField(this.reduced);
     /* a stone breaking out of the ground leaves its hole behind */
-    this.field.onBreak = (x, y, z, w, d, depth, angle) => { this.addPit(x, y, z, w, d, depth, angle); sound.crack(x / this.hw); };
-    this.field.onLand = (strength, x) => sound.hit(strength, x / this.hw);
+    this.field.onBreak = (x, y, z, w, d, depth, angle) => {
+      this.addPit(x, y, z, w, d, depth, angle);
+      sound.crack(x / this.hw);
+    };
+    this.field.onLand = (strength, x, size) => this.land(strength, x, size);
     this.field.onHome = (x) => sound.tick(x / this.hw);
     this.sequence = first;
-    const r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    const r = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: "high-performance",
+    });
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.1;
     r.shadowMap.enabled = true;
@@ -129,7 +192,8 @@ export class RuinsScene {
     this.renderer = r;
 
     const scene = this.scene;
-    scene.fog = new THREE.FogExp2(0x0a0b0d, 0.018);
+    /* night air: the distance fades into a faint blue-grey haze rather than staying sharp, as it would on the Moon */
+    scene.fog = new THREE.FogExp2(0x161a21, 0.034);
     scene.background = createBackdrop();
     scene.environment = createEnvironment(r);
 
@@ -139,7 +203,14 @@ export class RuinsScene {
     sun.position.set(-7, 11, 9);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
-    Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 9, bottom: -9, near: 1, far: 40 });
+    Object.assign(sun.shadow.camera, {
+      left: -12,
+      right: 12,
+      top: 9,
+      bottom: -9,
+      near: 1,
+      far: 40,
+    });
     sun.shadow.bias = -0.0008;
     sun.shadow.normalBias = 0.03;
     sun.shadow.radius = 3;
@@ -153,22 +224,48 @@ export class RuinsScene {
     scene.add(rim, fill, this.lamp);
     /* the ground: the one great rock the stones break away from */
     /* little sky reflection: seen at a slant it would wash the dark rock out to a pale sand */
-    const groundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, envMapIntensity: 0.12 });
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.92,
+      metalness: 0,
+      envMapIntensity: 0.12,
+    });
     groundMat.onBeforeCompile = (sh) => {
       sh.uniforms.uHoles = { value: this.holes.texture };
       sh.uniforms.uRunes = this.uni.uRunes;
+      sh.uniforms.uDetail = this.uni.uDetail;
       sh.uniforms.uRune = this.uni.uRune;
       sh.uniforms.uWave = this.wave;
-      sh.uniforms.uHolesRect = { value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D) };
+      sh.uniforms.uHolesRect = {
+        value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D),
+      };
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vGPos;')
-        .replace('#include <project_vertex>', '#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+        .replace("#include <common>", "#include <common>\nvarying vec3 vGPos;")
+        .replace(
+          "#include <project_vertex>",
+          "#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;",
+        );
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave;\n${GROUND_FN}`)
-        .replace('#include <color_fragment>', `#include <color_fragment>\n${GROUND_COLOR}`)
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(.88, .72, gmoss) + gcrack * .08;')
-        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${GROUND_RELIEF}`)
-        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GROUND_EMISSIVE}`);
+        .replace(
+          "#include <common>",
+          `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave;\n${GROUND_FN}`,
+        )
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>\n${GROUND_COLOR}`,
+        )
+        .replace(
+          "#include <roughnessmap_fragment>",
+          "#include <roughnessmap_fragment>\nroughnessFactor = mix(.88, .72, gmoss) + gcrack * .08;",
+        )
+        .replace(
+          "#include <normal_fragment_maps>",
+          `#include <normal_fragment_maps>\n${GROUND_RELIEF}`,
+        )
+        .replace(
+          "#include <emissivemap_fragment>",
+          `#include <emissivemap_fragment>\n${GROUND_EMISSIVE}`,
+        );
     };
     this.floor = new THREE.Mesh(createGroundGeometry(), groundMat);
     this.floor.receiveShadow = true;
@@ -178,40 +275,85 @@ export class RuinsScene {
     this.sky = createSky(this.uni.uRune, opts.projects ?? []);
     scene.add(this.sky.group);
 
-
     /* stones: one subdivided cube, shaped per instance in the vertex shader */
     const geo = new THREE.BoxGeometry(1, 1, 1, 10, 10, 10);
-    this.aSize = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STONES * 3), 3);
-    this.aHome = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STONES * 3), 3);
-    this.aMisc = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STONES * 2), 2);
-    geo.setAttribute('aSize', this.aSize);
-    geo.setAttribute('aHome', this.aHome);
-    geo.setAttribute('aMisc', this.aMisc);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0 });
+    this.aSize = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_STONES * 3),
+      3,
+    );
+    this.aHome = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_STONES * 3),
+      3,
+    );
+    this.aMisc = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_STONES * 2),
+      2,
+    );
+    geo.setAttribute("aSize", this.aSize);
+    geo.setAttribute("aHome", this.aHome);
+    geo.setAttribute("aMisc", this.aMisc);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.8,
+      metalness: 0,
+    });
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, this.uni);
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', `#include <common>\n${STONE_SHAPE}\nvarying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome;`)
-        .replace('#include <beginnormal_vertex>', `${STONE_VERTEX}\nvec3 objectNormal = sn;`)
-        .replace('#include <begin_vertex>', 'vec3 transformed = sp0;\nvLocal = position; vSize = aSize; vMisc = aMisc; vHome = aHome;')
-        .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
+        .replace(
+          "#include <common>",
+          `#include <common>\n${STONE_SHAPE}\nvarying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome; varying vec3 vSN;`,
+        )
+        .replace(
+          "#include <beginnormal_vertex>",
+          `${STONE_VERTEX}\nvec3 objectNormal = sn;\nvSN = snW;`,
+        )
+        .replace(
+          "#include <begin_vertex>",
+          "vec3 transformed = sp0;\nvLocal = position; vSize = aSize; vMisc = aMisc; vHome = aHome;",
+        )
+        .replace(
+          "#include <project_vertex>",
+          "#include <project_vertex>\nvWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;",
+        );
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${NOISE3}
+        .replace(
+          "#include <common>",
+          `#include <common>\n${NOISE3}
           uniform sampler2D uRunes; uniform vec2 uView; uniform vec3 uMouse; uniform float uHas; uniform float uTime; uniform float uSweep; uniform vec3 uRune; uniform float uGate;
-          varying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome;\n${GROUND_FN}`)
-        .replace('#include <color_fragment>', `#include <color_fragment>\n${STONE_COLOR}`)
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = .9 + crack * .08;')
-        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${STONE_RELIEF}`)
-        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${STONE_EMISSIVE}`);
+          varying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome; varying vec3 vSN;\n${GROUND_FN}`,
+        )
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>\n${STONE_COLOR}`,
+        )
+        .replace(
+          "#include <roughnessmap_fragment>",
+          "#include <roughnessmap_fragment>\nroughnessFactor = mix(.72, 1., stoneTex.b) + crack * .08;",
+        )
+        .replace(
+          "#include <normal_fragment_maps>",
+          `#include <normal_fragment_maps>\n${STONE_RELIEF}`,
+        )
+        .replace(
+          "#include <emissivemap_fragment>",
+          `#include <emissivemap_fragment>\n${STONE_EMISSIVE}`,
+        );
     };
-    const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    const depth = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+    });
     depth.onBeforeCompile = (sh) => {
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', `#include <common>\n${STONE_SHAPE}`)
-        .replace('#include <begin_vertex>', 'vec3 transformed = stoneP(position, normal);');
+        .replace("#include <common>", `#include <common>\n${STONE_SHAPE}`)
+        .replace(
+          "#include <begin_vertex>",
+          "vec3 transformed = stoneP(position, normal);",
+        );
     };
     this.stoneMesh = new THREE.InstancedMesh(geo, mat, MAX_STONES);
-    this.stoneMesh.castShadow = true; this.stoneMesh.receiveShadow = false;
+    this.stoneMesh.castShadow = true;
+    this.stoneMesh.receiveShadow = false;
     this.stoneMesh.customDepthMaterial = depth;
     this.stoneMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.stoneMesh.frustumCulled = false;
@@ -219,8 +361,16 @@ export class RuinsScene {
     scene.add(this.stoneMesh);
 
     /* vines ride on the stones: a thin stem of instanced segments, and leaves */
-    const stemMat = new THREE.MeshStandardMaterial({ color: 0x3d4a22, roughness: 0.85, metalness: 0 });
-    this.stemMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 5, 1, true), stemMat, MAX_STEMS);
+    const stemMat = new THREE.MeshStandardMaterial({
+      color: 0x3d4a22,
+      roughness: 0.85,
+      metalness: 0,
+    });
+    this.stemMesh = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(1, 1, 1, 5, 1, true),
+      stemMat,
+      MAX_STEMS,
+    );
     this.stemMesh.castShadow = this.stemMesh.receiveShadow = true;
     this.stemMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.stemMesh.frustumCulled = false;
@@ -228,74 +378,133 @@ export class RuinsScene {
     scene.add(this.stemMesh);
 
     /* pits: the holes stones leave in the ground, boxes seen from inside (only their far walls and floor draw) */
-    const pitMat = new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.95, metalness: 0, side: THREE.BackSide });
+    const pitMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2620,
+      roughness: 0.95,
+      metalness: 0,
+      side: THREE.BackSide,
+    });
     pitMat.onBeforeCompile = (sh) => {
       sh.uniforms.uHoles = { value: this.holes.texture };
       sh.uniforms.uHoleDepth = { value: this.holes.depthTexture };
-      sh.uniforms.uHolesRect = { value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D) };
+      sh.uniforms.uHolesRect = {
+        value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D),
+      };
       sh.uniforms.uHoleMax = { value: HOLES_MAX_DEPTH };
-      const vary = 'varying float vShade; varying vec3 vPW; varying vec3 vPN; varying float vTop; varying float vPitDepth;';
+      const vary =
+        "varying float vShade; varying vec3 vPW; varying vec3 vPN; varying float vTop; varying float vPitDepth;";
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', `#include <common>\n${vary}`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>\nvShade = position.y + .5;`)
-        .replace('#include <project_vertex>', `#include <project_vertex>
+        .replace("#include <common>", `#include <common>\n${vary}`)
+        .replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>\nvShade = position.y + .5;`,
+        )
+        .replace(
+          "#include <project_vertex>",
+          `#include <project_vertex>
 mat4 pitM = modelMatrix * instanceMatrix;
 vPW = (pitM * vec4(transformed, 1.)).xyz;
 vPN = normalize(mat3(pitM) * normal);
 vTop = (pitM * vec4(0., .5, 0., 1.)).y;
-vPitDepth = vTop - (pitM * vec4(0., -.5, 0., 1.)).y;`);
+vPitDepth = vTop - (pitM * vec4(0., -.5, 0., 1.)).y;`,
+        );
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${vary}
+        .replace(
+          "#include <common>",
+          `#include <common>\n${vary}
 uniform sampler2D uHoles; uniform sampler2D uHoleDepth; uniform vec4 uHolesRect; uniform float uHoleMax;
-vec2 holeUV(vec2 xz) { return vec2((xz.x + uHolesRect.x) / uHolesRect.z, 1. - (xz.y - uHolesRect.y) / uHolesRect.w); }`)
+vec2 holeUV(vec2 xz) { return vec2((xz.x + uHolesRect.x) / uHolesRect.z, 1. - (xz.y - uHolesRect.y) / uHolesRect.w); }`,
+        )
         /* where pits overlap they open into one another: a wall with another hole just beyond it, at least as deep as
            this point, isn't there, and neither is a floor lying inside a deeper hole. Then darker towards the bottom. */
-        .replace('#include <color_fragment>', `#include <color_fragment>
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
 if (abs(vPN.y) < .5) {
   vec2 beyond = holeUV(vPW.xz + vPN.xz * .04);
   if (texture2D(uHoles, beyond).r > .5 && texture2D(uHoleDepth, beyond).r * uHoleMax >= vTop - vPW.y - .01) discard;
 } else if (texture2D(uHoleDepth, holeUV(vPW.xz)).r * uHoleMax > vPitDepth + .03) discard;
-diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
+diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`,
+        );
     };
-    this.pitMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), pitMat, MAX_PITS);
+    this.pitMesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      pitMat,
+      MAX_PITS,
+    );
     this.pitMesh.receiveShadow = true;
     this.pitMesh.frustumCulled = false;
     this.pitMesh.count = 0;
     scene.add(this.pitMesh);
 
     const leafTex = createLeafTexture();
-    const leafMat = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.55, metalness: 0, envMapIntensity: 0.6 });
-    this.leafMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), leafMat, MAX_LEAVES);
+    const leafMat = new THREE.MeshStandardMaterial({
+      map: leafTex,
+      alphaTest: 0.45,
+      side: THREE.DoubleSide,
+      roughness: 0.55,
+      metalness: 0,
+      envMapIntensity: 0.6,
+    });
+    this.leafMesh = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 1),
+      leafMat,
+      MAX_LEAVES,
+    );
     this.leafMesh.castShadow = this.leafMesh.receiveShadow = true;
-    this.leafMesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: leafTex, alphaTest: 0.45 });
+    this.leafMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      map: leafTex,
+      alphaTest: 0.45,
+    });
     this.leafMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.leafMesh.frustumCulled = false;
     const col = new THREE.Color();
-    for (let i = 0; i < MAX_LEAVES; i++) this.leafMesh.setColorAt(i, col.setHSL(0.2 + Math.random() * 0.08, 0.45 + Math.random() * 0.25, 0.35 + Math.random() * 0.25));
+    for (let i = 0; i < MAX_LEAVES; i++)
+      this.leafMesh.setColorAt(
+        i,
+        col.setHSL(
+          0.2 + Math.random() * 0.08,
+          0.45 + Math.random() * 0.25,
+          0.35 + Math.random() * 0.25,
+        ),
+      );
     this.leafMesh.count = 0;
     scene.add(this.leafMesh);
 
     this.resize();
     /* the physics engine loads in the background, in its own chunk, so it never holds up the opening */
-    import('./physics').then((m) => m.StonePhysics.create()).then((p) => {
-      p.setGround(-this.hh * 0.96);
-      p.onHit = (strength, x) => sound.hit(strength, x / this.hw);
-      this.physics = p;
-    }).catch(() => { /* no WebAssembly: the simple fall stays */ });
+    import("./physics")
+      .then((m) => m.StonePhysics.create())
+      .then((p) => {
+        p.setGround(-this.hh * 0.96);
+        p.onHit = (strength, x, size) => this.land(strength, x, size);
+        this.physics = p;
+      })
+      .catch(() => {
+        /* no WebAssembly: the simple fall stays */
+      });
     /* first only the one stone, waiting to be struck */
     this.runeTarget.set(first[0].runeColor ?? RUNE_COLOR);
     this.uni.uRune.value.copy(this.runeTarget);
     this.field.placeAt([this.gateSpot()]);
     this.bind();
-    document.fonts?.ready.then(() => Promise.all([
-      document.fonts.load('800 100px "Inter Tight"'),
-      document.fonts.load(`40px ${RUNE_FONT}`, GLYPHS[0x22]),
-    ])).then(() => {
-      this.runes.redraw();
-      this.sky.rebuild();
-      this.layouts.clear();
-      if (this.started) this.assign(this.sequence[this.seqIndex]);
-    }).catch(() => { /* fonts are optional; the system fallbacks still draw */ });
+    document.fonts?.ready
+      .then(() =>
+        Promise.all([
+          document.fonts.load('800 100px "Inter Tight"'),
+          document.fonts.load(`40px ${RUNE_FONT}`, GLYPHS[0x22]),
+        ]),
+      )
+      .then(() => {
+        this.runes.redraw();
+        this.sky.rebuild();
+        this.layouts.clear();
+        if (this.started) this.assign(this.sequence[this.seqIndex]);
+      })
+      .catch(() => {
+        /* fonts are optional; the system fallbacks still draw */
+      });
     this.raf = requestAnimationFrame(this.frame);
   }
 
@@ -323,11 +532,15 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     this.sky.show();
     this.opts.onStart();
     const st = this.field.stones[0];
-    if (!st) { this.assign(this.sequence[this.seqIndex], true); return; }
-    st.mode = 'script';
+    if (!st) {
+      this.assign(this.sequence[this.seqIndex], true);
+      return;
+    }
+    st.mode = "script";
     st.restY = st.p.y;
     this.strikeT = 0;
-    sound.charge(0.6);
+    /* it tears itself up out of the rock, grinding, as the boulders do */
+    sound.crack(0);
     sound.whoosh(0.9, 0.5);
   }
 
@@ -335,41 +548,100 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
   private static readonly RISE = 0.6;
   private static readonly SLAM = 0.16;
   private strike(dt: number) {
-    const t = (this.strikeT += dt), st = this.field.stones[0];
-    if (!st || st.mode !== 'script') { this.strikeT = -1; return; }
+    const t = (this.strikeT += dt),
+      st = this.field.stones[0];
+    if (!st || st.mode !== "script") {
+      this.strikeT = -1;
+      return;
+    }
     const top = st.restY + this.hh * 0.22;
     if (t < RuinsScene.RISE) {
-      const k = t / RuinsScene.RISE, e = 1 - (1 - k) ** 3;
+      const k = t / RuinsScene.RISE,
+        e = 1 - (1 - k) ** 3;
       st.p.y = st.restY + (top - st.restY) * e;
-      st.r.set(Math.sin(t * 60) * 0.025 * k, st.r.y + dt * 2.5 * k, (st.spot?.tilt ?? 0) + Math.sin(t * 47) * 0.025 * k);
+      st.r.set(
+        Math.sin(t * 60) * 0.025 * k,
+        st.r.y + dt * 2.5 * k,
+        (st.spot?.tilt ?? 0) + Math.sin(t * 47) * 0.025 * k,
+      );
       this.uni.uGate.value = k;
       return;
     }
     /* driven into the rock, a fifth of its height */
-    const k = Math.min(1, (t - RuinsScene.RISE) / RuinsScene.SLAM), floor = this.field.floorAt(st.p.x, st.p.z) + st.size.y * 0.3;
+    const k = Math.min(1, (t - RuinsScene.RISE) / RuinsScene.SLAM),
+      floor = this.field.floorAt(st.p.x, st.p.z) + st.size.y * 0.3;
     st.p.y = top + (floor - top) * k * k * k;
     if (k < 1) return;
     /* impact: the stone stays sunk where it hit, the ground shakes, a wave of rune light runs out across the rock,
        and the stones begin to break free of it */
     this.strikeT = -1;
-    st.mode = 'rest';
+    st.mode = "rest";
     st.restY = st.p.y;
     st.q.setFromEuler(st.r);
     st.v.set(0, 0, 0);
     st.w.set(0, 0, 0);
     /* it leaves its hole in the rock when it rises again */
-    const ground = this.field.floorAt(st.p.x, st.p.z), depth = ground - (st.p.y - st.size.y / 2);
-    this.addPit(st.p.x, ground - depth / 2, st.p.z, st.size.x * 1.02, st.size.z * 1.02, depth, st.r.y);
+    const ground = this.field.floorAt(st.p.x, st.p.z),
+      depth = ground - (st.p.y - st.size.y / 2);
+    this.addPit(
+      st.p.x,
+      ground - depth / 2,
+      st.p.z,
+      st.size.x * 1.02,
+      st.size.z * 1.02,
+      depth,
+      st.r.y,
+    );
     this.wave.value.set(st.p.x, st.p.z, 0, 1);
     this.field.shake = 0.35;
-    sound.boom();
-    window.setTimeout(() => this.assign(this.sequence[this.seqIndex], true), 250);
+    /* the heaviest landing of all: the boulders' own sound at full weight, and the hardest jolt to the view */
+    sound.hit(1, 0, 1);
+    if (!this.reduced) {
+      this.kickV.x += (Math.random() - 0.5) * 1.2;
+      this.kickV.y -= 2.6;
+    }
+    window.setTimeout(
+      () => this.assign(this.sequence[this.seqIndex], true),
+      250,
+    );
   }
 
   /** The opening stone: one stone hovering in the middle, ivy over it, a rune like a target cut in it (𐰧, Yenisei ENT). */
+  /**
+   * How big a stone is among the others, for its sound: they are all meant as boulders, so 0.6 for the smallest up to
+   * 1 for one as big as the opening stone (sizes are relative to the view).
+   */
+  /*
+   * A boulder lands: its sound, and a jolt to the view of its own, by how big it is and how hard it came down: a drop
+   * and a throw to one side at random, which a spring then rocks back out of; and a little rumble after.
+   */
+  private land(strength: number, x: number, size: number) {
+    const z = this.bigness(size);
+    sound.hit(strength, x / this.hw, z);
+    if (this.reduced) return;
+    const m = strength * z * z;
+    this.kickV.x += (Math.random() - 0.5) * m * 1.6;
+    this.kickV.y -= m * (1.2 + Math.random() * 0.8);
+    this.field.shake = Math.min(0.25, this.field.shake + m * 0.05);
+  }
+
+  private bigness(size: number) {
+    return 0.6 + 0.4 * THREE.MathUtils.clamp(size / (this.hh * 0.38), 0, 1);
+  }
+
   private gateSpot(): StoneSpot {
-    const s = this.hh * 0.3;
-    return { x: 0, y: this.hh * 0.06, z: 0, w: s, h: s * 1.08, d: s * 0.72, tilt: 0.06, glyph: 0x27, vine: growVine(s, s * 1.08, s * 0.72, s / 3) };
+    const s = this.hh * 0.6;
+    return {
+      x: 0,
+      y: this.hh * 0.06,
+      z: 0,
+      w: s,
+      h: s * 1.08,
+      d: s * 0.72,
+      tilt: 0.06,
+      glyph: 0x27,
+      vine: growVine(s, s * 1.08, s * 0.72, s / 3),
+    };
   }
 
   dispose() {
@@ -380,8 +652,10 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
 
   /** Drop the stones: real physics if its engine is ready, else the field's simple fall. */
   private drop() {
+    /* the pits are in the physics' ground too, so stones can fall back into them */
+    this.physics?.setPits(this.pits);
     this.field.crumble();
-    this.physics?.drop(this.field.stones.filter((s) => s.mode === 'fall'));
+    this.physics?.drop(this.field.stones.filter((s) => s.mode === "fall"));
   }
 
   /** Lift the stones from wherever they lie and send them back into the shape. */
@@ -396,14 +670,32 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     this.openProject = project;
     this.sky.focus(project);
     this.focusDir = project >= 0 ? this.sky.gazeAt(project) : null;
+    if (this.focusDir) this.lastFocus = this.focusDir;
+    const realm =
+      project >= 0 && this.opts.projects?.[project]?.face === "lito";
+    if (realm !== this.realmWant) sound.whoosh(1.6, 0.6);
+    this.realmWant = realm;
   }
 
   /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
-  private addPit(x: number, y: number, z: number, w: number, d: number, depth: number, angle: number) {
+  private addPit(
+    x: number,
+    y: number,
+    z: number,
+    w: number,
+    d: number,
+    depth: number,
+    angle: number,
+  ) {
     if (this.pitMesh.count >= MAX_PITS) return;
     this.holes.add(x, z, w, d, angle, depth);
+    this.pits.push({ x, z, w, d, angle, depth });
     /* y is the stone's centre as it lay, flush with the surface; the pit is the room it took up */
-    this.m.compose(new THREE.Vector3(x, y, z), this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle), this.s.set(w, depth, d));
+    this.m.compose(
+      new THREE.Vector3(x, y, z),
+      this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle),
+      this.s.set(w, depth, d),
+    );
     this.pitMesh.setMatrixAt(this.pitMesh.count++, this.m);
     this.pitMesh.instanceMatrix.needsUpdate = true;
   }
@@ -416,18 +708,25 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
 
   private layout(shape: Shape) {
     let l = this.layouts.get(shape);
-    if (!l) { l = layStones(shape, this.hw, this.hh, MAX_STONES); this.layouts.set(shape, l); }
+    if (!l) {
+      l = layStones(shape, this.hw, this.hh, MAX_STONES);
+      this.layouts.set(shape, l);
+    }
     return l;
   }
 
   private readonly resize = () => {
-    const w = window.innerWidth, h = window.innerHeight;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const w = window.innerWidth,
+      h = window.innerHeight;
+    /* no more than one and a half pixels per CSS pixel: past that the cost grows faster than anyone can see */
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    this.camera.fov = w / h < 0.8 ? 46 : 30;
+    this.realm.resize(w / h);
+    this.baseFov = this.camera.fov = w / h < 0.8 ? 46 : 30;
     this.camera.updateProjectionMatrix();
-    this.hh = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * CAM_Z * 0.82;
+    this.hh =
+      Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * CAM_Z * 0.82;
     this.hw = this.hh * this.camera.aspect;
     this.uni.uView.value.set(this.hw, this.hh);
     this.floor.position.y = -this.hh * 0.96;
@@ -441,16 +740,26 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     clearTimeout(this.resizeTimer);
     this.resizeTimer = window.setTimeout(() => {
       this.resize();
-      if (this.started) this.assign(this.sequence[this.seqIndex]); else this.field.placeAt([this.gateSpot()]);
+      if (this.started) this.assign(this.sequence[this.seqIndex]);
+      else this.field.placeAt([this.gateSpot()]);
     }, 200);
   };
 
   private readonly onMove = (e: PointerEvent) => {
-    this.ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    this.ndc.set(
+      (e.clientX / window.innerWidth) * 2 - 1,
+      -(e.clientY / window.innerHeight) * 2 + 1,
+    );
     this.pointer.has = true;
-    if (this.press && Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) > 14) clearTimeout(this.press.timer);
+    if (
+      this.press &&
+      Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) > 14
+    )
+      clearTimeout(this.press.timer);
   };
-  private readonly onLeave = () => { this.pointer.has = false; };
+  private readonly onLeave = () => {
+    this.pointer.has = false;
+  };
   private readonly onDown = (e: PointerEvent) => {
     /* on a project constellation, or while one is open, a press is a click, never the start of a drop */
     if (this.hoverProject >= 0 || this.openProject >= 0) {
@@ -458,29 +767,62 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
       this.press = { x: e.clientX, y: e.clientY, timer: 0 };
       return;
     }
-    const timer = window.setTimeout(() => { if (!this.introDone) return; this.held = true; this.canvas.classList.add('held'); this.drop(); }, e.pointerType === 'mouse' ? 140 : 280);
+    const timer = window.setTimeout(
+      () => {
+        if (!this.introDone) return;
+        this.held = true;
+        this.canvas.classList.add("held");
+        this.drop();
+      },
+      e.pointerType === "mouse" ? 140 : 280,
+    );
     this.press = { x: e.clientX, y: e.clientY, timer };
   };
   private readonly onUp = (e: PointerEvent) => {
     if (!this.press) return;
     clearTimeout(this.press.timer);
-    const dy = e.clientY - this.press.y, dx = e.clientX - this.press.x;
+    const dy = e.clientY - this.press.y,
+      dx = e.clientX - this.press.x;
     if (this.pressProject >= 0 || this.openProject >= 0) {
       /* a click opens the constellation pressed on, or anywhere else closes the open one */
       if (Math.hypot(dx, dy) < 14) {
-        if (this.pressProject >= 0 && this.pressProject === this.hoverProject) this.opts.onProject?.(this.pressProject);
+        /* in Lito's place, a click does not take you back: only the panel's close does */
+        if (this.realmWant) {
+          /* stay */
+        } else if (
+          /* on the open one itself, a touch for whatever lives there (Lito), not a close */
+          this.pressProject >= 0 &&
+          this.pressProject === this.hoverProject &&
+          this.pressProject === this.openProject
+        ) {
+          if (!this.sky.poke()) this.opts.onProject?.(-1);
+        } else if (
+          this.pressProject >= 0 &&
+          this.pressProject === this.hoverProject
+        )
+          this.opts.onProject?.(this.pressProject);
         else if (this.openProject >= 0) this.opts.onProject?.(-1);
       }
       this.pressProject = -1;
       this.press = null;
-      if (e.pointerType !== 'mouse') this.pointer.has = false;
+      if (e.pointerType !== "mouse") this.pointer.has = false;
       return;
     }
-    if (this.started && !this.held && e.pointerType !== 'mouse' && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) this.opts.onStep(dy < 0 ? 1 : -1);
-    if (this.held) { this.held = false; this.rise(); }
+    if (
+      this.started &&
+      !this.held &&
+      e.pointerType !== "mouse" &&
+      Math.abs(dy) > 60 &&
+      Math.abs(dy) > Math.abs(dx)
+    )
+      this.opts.onStep(dy < 0 ? 1 : -1);
+    if (this.held) {
+      this.held = false;
+      this.rise();
+    }
     this.press = null;
-    this.canvas.classList.remove('held');
-    if (e.pointerType !== 'mouse') this.pointer.has = false;
+    this.canvas.classList.remove("held");
+    if (e.pointerType !== "mouse") this.pointer.has = false;
   };
   private readonly onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -492,46 +834,59 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
   };
   /* audio may only start from a gesture, so any press anywhere on the page can be the one */
   private readonly onAnyPress = () => sound.unlock();
-  private readonly onVisibility = () => sound.setVisible(document.visibilityState === 'visible');
+  private readonly onVisibility = () =>
+    sound.setVisible(document.visibilityState === "visible");
   private readonly onKey = (e: KeyboardEvent) => {
     sound.unlock();
     if (!this.started) {
-      if ((e.key === 'Enter' || e.key === ' ') && (e.target as HTMLElement | null)?.tagName !== 'BUTTON') { e.preventDefault(); this.start(); }
+      if (
+        (e.key === "Enter" || e.key === " ") &&
+        (e.target as HTMLElement | null)?.tagName !== "BUTTON"
+      ) {
+        e.preventDefault();
+        this.start();
+      }
       return;
     }
-    if (['ArrowDown', 'ArrowRight', 'PageDown'].includes(e.key)) this.opts.onStep(1);
-    if (['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key)) this.opts.onStep(-1);
-    if (e.key === ' ' && (e.target as HTMLElement | null)?.tagName !== 'BUTTON') {
+    if (["ArrowDown", "ArrowRight", "PageDown"].includes(e.key))
+      this.opts.onStep(1);
+    if (["ArrowUp", "ArrowLeft", "PageUp"].includes(e.key))
+      this.opts.onStep(-1);
+    if (
+      e.key === " " &&
+      (e.target as HTMLElement | null)?.tagName !== "BUTTON"
+    ) {
       e.preventDefault();
       if (!this.introDone) return;
       this.held = !this.held;
-      if (this.held) this.drop(); else this.rise();
+      if (this.held) this.drop();
+      else this.rise();
     }
   };
 
   private bind() {
-    window.addEventListener('resize', this.onResize);
-    window.addEventListener('pointermove', this.onMove);
-    document.addEventListener('pointerleave', this.onLeave);
-    this.canvas.addEventListener('pointerdown', this.onDown);
-    window.addEventListener('pointerup', this.onUp);
-    window.addEventListener('pointercancel', this.onUp);
-    window.addEventListener('wheel', this.onWheel, { passive: false });
-    window.addEventListener('keydown', this.onKey);
-    document.addEventListener('visibilitychange', this.onVisibility);
-    window.addEventListener('pointerdown', this.onAnyPress);
+    window.addEventListener("resize", this.onResize);
+    window.addEventListener("pointermove", this.onMove);
+    document.addEventListener("pointerleave", this.onLeave);
+    this.canvas.addEventListener("pointerdown", this.onDown);
+    window.addEventListener("pointerup", this.onUp);
+    window.addEventListener("pointercancel", this.onUp);
+    window.addEventListener("wheel", this.onWheel, { passive: false });
+    window.addEventListener("keydown", this.onKey);
+    document.addEventListener("visibilitychange", this.onVisibility);
+    window.addEventListener("pointerdown", this.onAnyPress);
   }
   private unbind() {
-    window.removeEventListener('resize', this.onResize);
-    window.removeEventListener('pointermove', this.onMove);
-    document.removeEventListener('pointerleave', this.onLeave);
-    this.canvas.removeEventListener('pointerdown', this.onDown);
-    window.removeEventListener('pointerup', this.onUp);
-    window.removeEventListener('pointercancel', this.onUp);
-    window.removeEventListener('wheel', this.onWheel);
-    window.removeEventListener('keydown', this.onKey);
-    document.removeEventListener('visibilitychange', this.onVisibility);
-    window.removeEventListener('pointerdown', this.onAnyPress);
+    window.removeEventListener("resize", this.onResize);
+    window.removeEventListener("pointermove", this.onMove);
+    document.removeEventListener("pointerleave", this.onLeave);
+    this.canvas.removeEventListener("pointerdown", this.onDown);
+    window.removeEventListener("pointerup", this.onUp);
+    window.removeEventListener("pointercancel", this.onUp);
+    window.removeEventListener("wheel", this.onWheel);
+    window.removeEventListener("keydown", this.onKey);
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    window.removeEventListener("pointerdown", this.onAnyPress);
   }
 
   private readonly ray = new THREE.Raycaster();
@@ -559,27 +914,37 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
         this.swept = false;
       }
     }
-    if (!this.swept && this.field.settled) { this.swept = true; this.sweep = 1; }
+    if (!this.swept && this.field.settled) {
+      this.swept = true;
+      this.sweep = 1;
+    }
     if (this.started && this.field.settled) this.introDone = true;
     this.sweep = Math.max(0, this.sweep - dt / 1.4);
 
     if (this.pointer.has) {
       this.ray.setFromCamera(this.ndc, this.camera);
-      if (this.ray.ray.intersectPlane(this.plane, this.hit)) { this.pointer.x = this.hit.x; this.pointer.y = this.hit.y; }
+      if (this.ray.ray.intersectPlane(this.plane, this.hit)) {
+        this.pointer.x = this.hit.x;
+        this.pointer.y = this.hit.y;
+      }
     }
     if (this.strikeT >= 0) this.strike(dt);
     else this.uni.uGate.value *= Math.exp(-dt * 3);
-    if (this.wave.value.z >= 0 && this.wave.value.z < 10) this.wave.value.z += dt;
+    if (this.wave.value.z >= 0 && this.wave.value.z < 10)
+      this.wave.value.z += dt;
     this.physics?.step(dt);
     this.field.step(dt * 0.5, this.time, this.pointer);
     this.field.step(dt * 0.5, this.time, this.pointer);
 
     /* write instances */
     const stones = this.field.stones;
-    let nl = 0, ns = 0;
+    let nl = 0,
+      ns = 0;
     stones.forEach((st, i) => {
       const sp = st.spot;
-      const w = st.size.x || 1, h = st.size.y || 1, d = st.size.z || 1;
+      const w = st.size.x || 1,
+        h = st.size.y || 1,
+        d = st.size.z || 1;
       this.q.setFromEuler(st.r);
       this.s.set(w * st.alive, h * st.alive, d * st.alive);
       this.m.compose(st.p, this.q, this.s);
@@ -591,7 +956,11 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
         /* vines only show once the stone is out of the ground */
         /* and grow with the stone while it changes size */
         const k = st.alive * (1 - st.bury);
-        this.m2.compose(st.p, this.q, this.s.set(k * w / sp.w, k * h / sp.h, k * d / sp.d));
+        this.m2.compose(
+          st.p,
+          this.q,
+          this.s.set((k * w) / sp.w, (k * h) / sp.h, (k * d) / sp.d),
+        );
         for (const sm of sp.vine.stem) {
           if (ns >= MAX_STEMS) break;
           this.stemMesh.setMatrixAt(ns++, this.m.multiplyMatrices(this.m2, sm));
@@ -604,7 +973,10 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     });
     this.stoneMesh.count = stones.length;
     this.stoneMesh.instanceMatrix.needsUpdate = true;
-    this.aHome.needsUpdate = this.aSize.needsUpdate = this.aMisc.needsUpdate = true;
+    this.aHome.needsUpdate =
+      this.aSize.needsUpdate =
+      this.aMisc.needsUpdate =
+        true;
     this.leafMesh.count = nl;
     this.leafMesh.instanceMatrix.needsUpdate = true;
     this.stemMesh.count = ns;
@@ -619,34 +991,86 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     u.uHas.value = this.pointer.has ? 1 : 0;
     u.uMouse.value.set(this.pointer.x, this.pointer.y, 0);
     this.lamp.position.set(this.pointer.x, this.pointer.y, 1.4);
-    this.lamp.intensity += ((this.pointer.has ? 1.8 * PI : 0) - this.lamp.intensity) * Math.min(1, dt * 5);
+    this.lamp.intensity +=
+      ((this.pointer.has ? 1.8 * PI : 0) - this.lamp.intensity) *
+      Math.min(1, dt * 5);
 
     /*
      * camera: a slight three-quarter view that looks where the pointer goes (up towards the sky, out to the sides),
      * easing after it, with only a little sway of its own, plus a little shake when stones land
      */
     this.field.shake = Math.max(0, this.field.shake - dt * 0.5);
-    const shake = this.field.shake, par = this.reduced ? 0 : 1;
+    const shake = this.field.shake,
+      par = this.reduced ? 0 : 1;
     /* in the projects scene the gaze leans up, towards the constellations */
     /* and the pointer only nudges it there, so the constellations hold still enough to be aimed at */
-    if (this.lookUp) this.gazeWant.set(this.ndc.x * 0.25, 1 + this.ndc.y * 0.25);
+    if (this.lookUp)
+      this.gazeWant.set(this.ndc.x * 0.25, 1.95 + this.ndc.y * 0.25);
     else this.gazeWant.copy(this.ndc);
     this.gaze.lerp(this.gazeWant, Math.min(1, dt * 3));
+    /* the landing jolts, sprung back */
+    this.kickV.addScaledVector(this.kick, -160 * dt).multiplyScalar(Math.max(0, 1 - 9 * dt));
+    this.kick.addScaledVector(this.kickV, dt);
     this.camera.position.set(
       /* the shake is a smooth wobble, not a fresh random jolt every frame, so the far sky doesn't flicker */
-      this.camBase.x + this.gaze.x * 0.6 * par + Math.sin(this.time * 41) * shake * 0.5,
-      this.camBase.y + this.gaze.y * 0.25 * par + Math.sin(this.time * 53 + 1.7) * shake * 0.5,
+      this.camBase.x +
+        this.gaze.x * 0.6 * par +
+        Math.sin(this.time * 41) * shake * 0.5 +
+        this.kick.x,
+      this.camBase.y +
+        this.gaze.y * 0.25 * par +
+        Math.sin(this.time * 53 + 1.7) * shake * 0.5 +
+        this.kick.y,
       this.camBase.z,
     );
     /* with a project open it turns to that constellation instead */
-    if (this.focusDir) this.lookWant.copy(this.camera.position).addScaledVector(this.focusDir, 14);
-    else this.lookWant.set(this.look.x + this.gaze.x * 1.6 * par, this.look.y + this.gaze.y * 2.6 * par, this.look.z);
-    this.lookCur.lerp(this.lookWant, Math.min(1, dt * (this.focusDir ? 2.2 : 6)));
+    const focus = this.focusDir ?? (this.sky.leaving() ? this.lastFocus : null);
+    if (focus)
+      this.lookWant.copy(this.camera.position).addScaledVector(focus, 14);
+    else
+      this.lookWant.set(
+        this.look.x + this.gaze.x * 1.6 * par,
+        this.look.y + this.gaze.y * 2.6 * par,
+        this.look.z,
+      );
+    this.lookCur.lerp(this.lookWant, Math.min(1, dt * (focus ? 2.2 : 6)));
     this.camera.lookAt(this.lookCur);
+    /* and leans in on an open nebula */
+    const fov =
+      this.baseFov *
+      (1 - 0.3 * THREE.MathUtils.smoothstep(this.sky.opened(), 0, 1));
+    if (Math.abs(fov - this.camera.fov) > 1e-3) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
     this.camera.updateMatrixWorld();
-    this.hoverProject = this.started && this.pointer.has ? this.sky.pick(this.ray.ray.direction) : -1;
-    this.canvas.classList.toggle('pick', this.hoverProject >= 0);
-    this.sky.update(dt, this.camera, this.pointer.has ? this.ray.ray.direction : null);
-    this.renderer.render(this.scene, this.camera);
+    this.realmT = THREE.MathUtils.clamp(
+      this.realmT + (this.realmWant ? dt : -dt) / 1.6,
+      0,
+      1,
+    );
+    const there = this.realmT >= 0.5;
+    this.hoverProject =
+      this.started && this.pointer.has && !there
+        ? this.sky.pick(this.ray.ray.direction)
+        : -1;
+    this.canvas.classList.toggle("pick", this.hoverProject >= 0);
+    this.sky.update(
+      dt,
+      this.camera,
+      this.pointer.has ? this.ray.ray.direction : null,
+    );
+    /* the crossing: the light swells to white and falls away on the other side */
+    const flash = Math.max(0, 1 - Math.abs(this.realmT - 0.5) * 2.2);
+    this.canvas.style.filter =
+      flash > 0.002
+        ? `brightness(${1 + flash ** 2 * 9}) saturate(${1 - flash * 0.6})`
+        : "";
+    if (there) {
+      if (!this.wasThere) this.realm.enter();
+      this.realm.update(dt, this.ndc, this.time);
+      this.renderer.render(this.realm.scene, this.realm.camera);
+    } else this.renderer.render(this.scene, this.camera);
+    this.wasThere = there;
   };
 }

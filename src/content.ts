@@ -1,5 +1,5 @@
 import { puzzlePiece, stoneText, type Shape } from "./scene/shapes";
-import { cursorArrow, stele } from "./scene/marks";
+import { cursorArrow, stele, university } from "./scene/marks";
 import { RUNE_FONT } from "./scene/textures";
 
 export type Lang = "tr" | "en";
@@ -28,6 +28,10 @@ export type Project = {
   link?: { href: string; label: string };
   /** a logo with a transparent background, in public/; when opened, the stars draw its outline instead of the name */
   logo?: string;
+  /** the project's own colour: a nebula behind its constellation, and the light of its runes */
+  color?: string;
+  /** a face that comes alive in its nebula when opened, instead of the logo written in letters */
+  face?: "lito";
 };
 
 /** The work, written in the sky. */
@@ -45,6 +49,7 @@ export const PROJECTS: Project[] = [
     },
     link: { href: "https://syncrosale.com", label: "syncrosale.com" },
     logo: "logos/syncrosale.png",
+    color: "#fb923c",
   },
   {
     id: "lithium",
@@ -52,12 +57,16 @@ export const PROJECTS: Project[] = [
     glyph: 0x1e,
     az: -22,
     el: 16.8,
-    role: { tr: "SyncroSale içinde · komuta merkezi", en: "Inside SyncroSale · command center" },
+    role: {
+      tr: "SyncroSale içinde · komuta merkezi",
+      en: "Inside SyncroSale · command center",
+    },
     body: {
-      tr: "SyncroSale eklentisinin komuta merkezi. Ürün bulucuyu, ürün zekâsını, rakip radarını, satış raporlarını, katalog temizliğini ve akıllı envanteri tek bir yerde toplar; her ilanı bilinen her şeyle tartıp \"Bugün neye bakmalıyım?\" sorusunu cevaplar. Verisini eklentinin dışında bir klasöre yedekler, eklenti kaldırılsa bile hiçbir şey kaybolmaz.",
-      en: "The command center of the SyncroSale extension. It gathers the product finder, product intelligence, competitor radar, sales reports, catalog cleanup and a smart inventory in one place, weighs every listing against everything known about it, and answers \"What should I look at today?\". It backs its data up to a folder outside the extension, so nothing is lost even if the extension is removed.",
+      tr: 'SyncroSale eklentisinin komuta merkezi. Ürün bulucuyu, ürün zekâsını, rakip radarını, satış raporlarını, katalog temizliğini ve akıllı envanteri tek bir yerde toplar; her ilanı bilinen her şeyle tartıp "Bugün neye bakmalıyım?" sorusunu cevaplar. Verisini eklentinin dışında bir klasöre yedekler, eklenti kaldırılsa bile hiçbir şey kaybolmaz.',
+      en: 'The command center of the SyncroSale extension. It gathers the product finder, product intelligence, competitor radar, sales reports, catalog cleanup and a smart inventory in one place, weighs every listing against everything known about it, and answers "What should I look at today?". It backs its data up to a folder outside the extension, so nothing is lost even if the extension is removed.',
     },
     logo: "logos/lithium.png",
+    color: "#c084fc",
   },
   {
     id: "lito",
@@ -71,6 +80,8 @@ export const PROJECTS: Project[] = [
       en: "The little robot that lives inside Lithium. It runs the scan queue, asks before taking on a big job, and dances when one is done. It gets sleepy at night, puts on headphones when music plays, and tells you each day what it has read. A helper that talks with a face, not just numbers.",
     },
     logo: "logos/lito.png",
+    color: "#5eead4",
+    face: "lito",
   },
   {
     id: "traceco2",
@@ -83,7 +94,10 @@ export const PROJECTS: Project[] = [
       tr: "Avrupa'daki tüketicilerin ve markaların bir ürünün karbon ayak izini ham maddeden mağaza rafına kadar, tedarik zincirinin her adımında şeffafça izleyebildiği bir platform.",
       en: "A platform that lets consumers and brands in Europe follow a product's carbon footprint openly, at every step of the supply chain from raw material to the shop shelf.",
     },
-    link: { href: "https://github.com/necatimertmetin/traceco2", label: "GitHub" },
+    link: {
+      href: "https://github.com/necatimertmetin/traceco2",
+      label: "GitHub",
+    },
   },
   {
     id: "afterlive",
@@ -96,7 +110,10 @@ export const PROJECTS: Project[] = [
       tr: "Gece hayatını ekrana taşıyan bir platform: şehrin mekânlarından gerçek zamanlı canlı yayınlar, her hafta yenilenen etkinlik takvimi ve gecenin hikâyeleri. Evde olabilirsin, ama gece hep seninle.",
       en: "A platform that brings nightlife to the screen: real-time live streams from the city's venues, a weekly events calendar and stories from the night. You might be at home, but the night is always with you.",
     },
-    link: { href: "https://necatimertmetin.github.io/afterlive/", label: "afterlive" },
+    link: {
+      href: "https://necatimertmetin.github.io/afterlive/",
+      label: "afterlive",
+    },
     logo: "logos/afterlive.png",
   },
   {
@@ -127,18 +144,29 @@ export const SCENES: Scene[] = [
   {
     /* "Mert Metin" in Orkhon letters, right to left, the e unwritten as in the inscriptions */
     shapes: [
-      stoneText("\u{10C22}\u{10C3C}\u{10C45} \u{10C22}\u{10C45}\u{10C03}\u{10C24}", {
-        font: RUNE_FONT,
-        weight: 400,
-        outline: 0.06,
-        rows: 16,
-        maxW: 0.74,
-      }),
+      stoneText(
+        "\u{10C22}\u{10C3C}\u{10C45} \u{10C22}\u{10C45}\u{10C03}\u{10C24}",
+        {
+          font: RUNE_FONT,
+          weight: 400,
+          outline: 0.06,
+          rows: 16,
+          maxW: 0.74,
+        },
+      ),
     ],
     title: { tr: "Hakkımda", en: "About" },
     body: {
-      tr: "Trakya Üniversitesi'nde bilgisayar mühendisliği okudum. Bugün ABD'deki bir ekip için Amazon satıcılarına yönelik bir platformu uçtan uca tek başıma kuruyorum. Taşlar adımı Göktürk harfleriyle yazıyor.",
-      en: "I studied computer engineering at Trakya University. Today I build a platform for Amazon sellers end to end, on my own, for a team in the US. The stones write my name in Old Turkic letters.",
+      tr: "Bugün ABD'deki bir ekip için Amazon satıcılarına yönelik bir platformu uçtan uca tek başıma kuruyorum. Taşlar adımı Göktürk harfleriyle yazıyor.",
+      en: "Today I build a platform for Amazon sellers end to end, on my own, for a team in the US. The stones write my name in Old Turkic letters.",
+    },
+  },
+  {
+    shapes: [university],
+    title: { tr: "Üniversite", en: "University" },
+    body: {
+      tr: "Trakya Üniversitesi'nde bilgisayar mühendisliği okudum. Taşlar okulun Edirne'deki rektörlük binasını, eski Karaağaç Garı'nı kuruyor.",
+      en: "I studied computer engineering at Trakya University. The stones build its rectorate in Edirne, the old Karaağaç railway station.",
     },
   },
   {
@@ -217,7 +245,10 @@ export const UI: Record<string, Text> = {
   projects: { tr: "Projeler", en: "Projects" },
   close: { tr: "Kapat", en: "Close" },
   begin: { tr: "BAŞLA", en: "BEGIN" },
-  beginNote: { tr: "Sesli bir deneyim · taşa dokun", en: "An experience with sound · touch the stone" },
+  beginNote: {
+    tr: "Sesli bir deneyim · taşa dokun",
+    en: "An experience with sound · touch the stone",
+  },
 };
 
 export const CONTACT = {

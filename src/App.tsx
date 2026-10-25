@@ -32,7 +32,10 @@ export default function App() {
       ruins.current = new RuinsScene(canvas.current, SCENES[0].shapes, {
         onStep: step,
         onStart: () => { setStarted(true); track('start'); },
-        projects: PROJECTS.map((p) => ({ glyph: p.glyph, az: p.az, el: p.el, name: p.name.toUpperCase(), logo: p.logo && import.meta.env.BASE_URL + p.logo })),
+        projects: PROJECTS.map((p) => ({
+          glyph: p.glyph, az: p.az, el: p.el, name: p.name.toUpperCase(), logo: p.logo && import.meta.env.BASE_URL + p.logo,
+          color: p.color, face: p.face,
+        })),
         onProject: setProject,
       });
     } catch {
