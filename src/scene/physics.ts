@@ -75,9 +75,10 @@ export class StonePhysics {
         .setAngularDamping(0.3)
         .setCcdEnabled(true));
       /* a box rounded like the stone, a little under its full size so the bumps of the mesh rest on things */
-      const r = Math.min(sp.w, sp.h, sp.d) * 0.18;
-      const hx = Math.max(0.01, sp.w * 0.48 - r), hy = Math.max(0.01, sp.h * 0.48 - r), hz = Math.max(0.01, sp.d * 0.48 - r);
-      const mass = sp.w * sp.h * sp.d * 2.5;
+      const { x: sw, y: sh, z: sd } = s.size;
+      const r = Math.min(sw, sh, sd) * 0.18;
+      const hx = Math.max(0.01, sw * 0.48 - r), hy = Math.max(0.01, sh * 0.48 - r), hz = Math.max(0.01, sd * 0.48 - r);
+      const mass = sw * sh * sd * 2.5;
       const col = this.world.createCollider(RAPIER.ColliderDesc.roundCuboid(hx, hy, hz, r)
         .setDensity(2.5).setFriction(0.75).setRestitution(0.12)
         .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
@@ -110,7 +111,7 @@ export class StonePhysics {
         const s = this.byCollider.get(e.collider1()) ?? this.byCollider.get(e.collider2());
         if (!s || this.time - (this.lastHit.get(s) ?? -1) < 0.25) return;
         this.lastHit.set(s, this.time);
-        const sp = s.spot!, mass = sp.w * sp.h * sp.d * 2.5;
+        const mass = s.size.x * s.size.y * s.size.z * 2.5;
         this.onHit?.(Math.min(1, e.totalForceMagnitude() / (mass * 900)), s.p.x);
       });
     }

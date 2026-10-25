@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { GROUND_COLOR, GROUND_EMISSIVE, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
 import { createGroundGeometry } from './ground';
 import { createSky } from './sky';
-import { GLYPHS, HOLES_D, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createInscription, createLeafTexture, createRuneAtlas } from './textures';
+import { GLYPHS, HOLES_D, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createLeafTexture, createRuneAtlas } from './textures';
 import { layStones, type Shape, type StoneSpot } from './shapes';
 import { StoneField, type Pointer } from './stones';
 import { sound } from './sound';
+import { growVine } from './vines';
 import type { StonePhysics } from './physics';
 
 const MAX_STONES = 1200;
@@ -21,6 +22,8 @@ const PI = Math.PI;
 export type RuinsOptions = {
   /** asked to move one scene forward (+1) or back (-1) by wheel, keys or a touch swipe */
   onStep: (dir: 1 | -1) => void;
+  /** the visitor has begun (by the opening stone, or Enter / Space) */
+  onStart: () => void;
 };
 
 /**
@@ -44,16 +47,16 @@ export class RuinsScene {
   private readonly aHome: THREE.InstancedBufferAttribute;
   private readonly aMisc: THREE.InstancedBufferAttribute;
   private readonly runes = createRuneAtlas();
-  private readonly inscription = createInscription();
   private readonly holes = createHoleMask();
   private readonly uni = {
     uRunes: { value: this.runes.texture as THREE.Texture },
-    uInscription: { value: this.inscription.texture as THREE.Texture },
     uView: { value: new THREE.Vector2(1, 1) },
     uMouse: { value: new THREE.Vector3() },
     uHas: { value: 0 },
     uTime: { value: 0 },
     uSweep: { value: 0 },
+    /** how charged the opening stone's rune is as it rises to strike, 0 to 1 */
+    uGate: { value: 0 },
     uRune: { value: new THREE.Color(RUNE_COLOR) },
   };
   /** the rune colour the current shape asks for; `uRune` eases towards it */
@@ -65,6 +68,12 @@ export class RuinsScene {
   private hh = 1;
   private layouts = new Map<Shape, StoneSpot[]>();
   private sequence: Shape[];
+  /** the opening is waiting on a single stone until the visitor begins; nothing else happens before */
+  private started = false;
+  /** seconds into the opening stone's strike (rise, then slam), or -1 when it isn't striking */
+  private strikeT = -1;
+  /** the shock wave across the ground from the strike: x, z of the impact, seconds since it (-1 before), strength */
+  private readonly wave = { value: new THREE.Vector4(0, 0, -1, 0) };
   private seqIndex = 0;
   private seqTimer = 0;
   private time = 0;
@@ -79,6 +88,8 @@ export class RuinsScene {
   private last = 0;
   private pointer: Pointer = { has: false, x: 0, y: 0 };
   private ndc = new THREE.Vector2();
+  /** where the camera is looking, easing after the pointer */
+  private readonly gaze = new THREE.Vector2();
   private press: { x: number; y: number; timer: number } | null = null;
   private wheelLock = 0;
   private readonly camBase = new THREE.Vector3(1.6, 0.9, CAM_Z);
@@ -132,12 +143,13 @@ export class RuinsScene {
       sh.uniforms.uHoles = { value: this.holes.texture };
       sh.uniforms.uRunes = this.uni.uRunes;
       sh.uniforms.uRune = this.uni.uRune;
+      sh.uniforms.uWave = this.wave;
       sh.uniforms.uHolesRect = { value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D) };
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vGPos;')
         .replace('#include <project_vertex>', '#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune;\n${GROUND_FN}`)
+        .replace('#include <common>', `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave;\n${GROUND_FN}`)
         .replace('#include <color_fragment>', `#include <color_fragment>\n${GROUND_COLOR}`)
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(.88, .72, gmoss) + gcrack * .08;')
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${GROUND_RELIEF}`)
@@ -170,7 +182,7 @@ export class RuinsScene {
         .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>\n${NOISE3}
-          uniform sampler2D uRunes; uniform sampler2D uInscription; uniform vec2 uView; uniform vec3 uMouse; uniform float uHas; uniform float uTime; uniform float uSweep; uniform vec3 uRune;
+          uniform sampler2D uRunes; uniform vec2 uView; uniform vec3 uMouse; uniform float uHas; uniform float uTime; uniform float uSweep; uniform vec3 uRune; uniform float uGate;
           varying vec3 vLocal; varying vec3 vSize; varying vec2 vMisc; varying vec3 vWPos; varying vec3 vHome;\n${GROUND_FN}`)
         .replace('#include <color_fragment>', `#include <color_fragment>\n${STONE_COLOR}`)
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = .9 + crack * .08;')
@@ -240,8 +252,10 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       p.onHit = (strength, x) => sound.hit(strength, x / this.hw);
       this.physics = p;
     }).catch(() => { /* no WebAssembly: the simple fall stays */ });
-    this.assign(first[0], true);
+    /* first only the one stone, waiting to be struck */
+    this.runeTarget.set(first[0].runeColor ?? RUNE_COLOR);
     this.uni.uRune.value.copy(this.runeTarget);
+    this.field.placeAt([this.gateSpot()]);
     this.bind();
     document.fonts?.ready.then(() => Promise.all([
       document.fonts.load('800 100px "Inter Tight"'),
@@ -250,7 +264,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       this.runes.redraw();
       this.sky.rebuild();
       this.layouts.clear();
-      this.assign(this.sequence[this.seqIndex], this.time < 1.2);
+      if (this.started) this.assign(this.sequence[this.seqIndex]);
     }).catch(() => { /* fonts are optional; the system fallbacks still draw */ });
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -265,6 +279,66 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     this.assign(shapes[0]);
     sound.whoosh(1.8);
     this.swept = false;
+  }
+
+  /**
+   * Begin: the waiting stone strikes the ground (this is also the gesture that lets the sound start), and a moment later
+   * the stones break out of the rock. The struck stone rises again and takes its place among them.
+   */
+  start() {
+    if (this.started) return;
+    this.started = true;
+    sound.unlock();
+    this.sky.show();
+    this.opts.onStart();
+    const st = this.field.stones[0];
+    if (!st) { this.assign(this.sequence[this.seqIndex], true); return; }
+    st.mode = 'script';
+    st.restY = st.p.y;
+    this.strikeT = 0;
+    sound.charge(0.6);
+    sound.whoosh(0.9, 0.5);
+  }
+
+  /* the strike: the stone rises and its rune charges, then it is driven down into the rock */
+  private static readonly RISE = 0.6;
+  private static readonly SLAM = 0.16;
+  private strike(dt: number) {
+    const t = (this.strikeT += dt), st = this.field.stones[0];
+    if (!st || st.mode !== 'script') { this.strikeT = -1; return; }
+    const top = st.restY + this.hh * 0.22;
+    if (t < RuinsScene.RISE) {
+      const k = t / RuinsScene.RISE, e = 1 - (1 - k) ** 3;
+      st.p.y = st.restY + (top - st.restY) * e;
+      st.r.set(Math.sin(t * 60) * 0.025 * k, st.r.y + dt * 2.5 * k, (st.spot?.tilt ?? 0) + Math.sin(t * 47) * 0.025 * k);
+      this.uni.uGate.value = k;
+      return;
+    }
+    /* driven into the rock, a fifth of its height */
+    const k = Math.min(1, (t - RuinsScene.RISE) / RuinsScene.SLAM), floor = this.field.floorAt(st.p.x, st.p.z) + st.size.y * 0.3;
+    st.p.y = top + (floor - top) * k * k * k;
+    if (k < 1) return;
+    /* impact: the stone stays sunk where it hit, the ground shakes, a wave of rune light runs out across the rock,
+       and the stones begin to break free of it */
+    this.strikeT = -1;
+    st.mode = 'rest';
+    st.restY = st.p.y;
+    st.q.setFromEuler(st.r);
+    st.v.set(0, 0, 0);
+    st.w.set(0, 0, 0);
+    /* it leaves its hole in the rock when it rises again */
+    const ground = this.field.floorAt(st.p.x, st.p.z), depth = ground - (st.p.y - st.size.y / 2);
+    this.addPit(st.p.x, ground - depth / 2, st.p.z, st.size.x * 1.02, st.size.z * 1.02, depth, st.r.y);
+    this.wave.value.set(st.p.x, st.p.z, 0, 1);
+    this.field.shake = 0.35;
+    sound.boom();
+    window.setTimeout(() => this.assign(this.sequence[this.seqIndex], true), 250);
+  }
+
+  /** The opening stone: one stone hovering in the middle, ivy over it, a rune like a target cut in it (𐰧, Yenisei ENT). */
+  private gateSpot(): StoneSpot {
+    const s = this.hh * 0.3;
+    return { x: 0, y: this.hh * 0.06, z: 0, w: s, h: s * 1.08, d: s * 0.72, tilt: 0.06, glyph: 0x27, vine: growVine(s, s * 1.08, s * 0.72, s / 3) };
   }
 
   dispose() {
@@ -299,8 +373,6 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
   private assign(shape: Shape, intro = false) {
     this.runeTarget.set(shape.runeColor ?? RUNE_COLOR);
     const spots = this.layout(shape);
-    /* a slab's inscription is painted to fit the slab's face */
-    if ('slab' in shape && spots[0]) this.inscription.paint(shape.slab, spots[0].w / spots[0].h);
     this.field.assign(spots, intro);
   }
 
@@ -329,7 +401,10 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
   private resizeTimer = 0;
   private readonly onResize = () => {
     clearTimeout(this.resizeTimer);
-    this.resizeTimer = window.setTimeout(() => { this.resize(); this.assign(this.sequence[this.seqIndex]); }, 200);
+    this.resizeTimer = window.setTimeout(() => {
+      this.resize();
+      if (this.started) this.assign(this.sequence[this.seqIndex]); else this.field.placeAt([this.gateSpot()]);
+    }, 200);
   };
 
   private readonly onMove = (e: PointerEvent) => {
@@ -346,7 +421,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     if (!this.press) return;
     clearTimeout(this.press.timer);
     const dy = e.clientY - this.press.y, dx = e.clientX - this.press.x;
-    if (!this.held && e.pointerType !== 'mouse' && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) this.opts.onStep(dy < 0 ? 1 : -1);
+    if (this.started && !this.held && e.pointerType !== 'mouse' && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) this.opts.onStep(dy < 0 ? 1 : -1);
     if (this.held) { this.held = false; this.rise(); }
     this.press = null;
     this.canvas.classList.remove('held');
@@ -354,6 +429,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
   };
   private readonly onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    if (!this.started) return;
     const now = performance.now();
     if (now < this.wheelLock || Math.abs(e.deltaY) < 6) return;
     this.wheelLock = now + 1500;
@@ -364,6 +440,10 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
   private readonly onVisibility = () => sound.setVisible(document.visibilityState === 'visible');
   private readonly onKey = (e: KeyboardEvent) => {
     sound.unlock();
+    if (!this.started) {
+      if ((e.key === 'Enter' || e.key === ' ') && (e.target as HTMLElement | null)?.tagName !== 'BUTTON') { e.preventDefault(); this.start(); }
+      return;
+    }
     if (['ArrowDown', 'ArrowRight', 'PageDown'].includes(e.key)) this.opts.onStep(1);
     if (['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key)) this.opts.onStep(-1);
     if (e.key === ' ' && (e.target as HTMLElement | null)?.tagName !== 'BUTTON') {
@@ -425,13 +505,16 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       }
     }
     if (!this.swept && this.field.settled) { this.swept = true; this.sweep = 1; }
-    if (this.field.settled) this.introDone = true;
+    if (this.started && this.field.settled) this.introDone = true;
     this.sweep = Math.max(0, this.sweep - dt / 1.4);
 
     if (this.pointer.has) {
       this.ray.setFromCamera(this.ndc, this.camera);
       if (this.ray.ray.intersectPlane(this.plane, this.hit)) { this.pointer.x = this.hit.x; this.pointer.y = this.hit.y; }
     }
+    if (this.strikeT >= 0) this.strike(dt);
+    else this.uni.uGate.value *= Math.exp(-dt * 3);
+    if (this.wave.value.z >= 0 && this.wave.value.z < 10) this.wave.value.z += dt;
     this.physics?.step(dt);
     this.field.step(dt * 0.5, this.time, this.pointer);
     this.field.step(dt * 0.5, this.time, this.pointer);
@@ -441,7 +524,7 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     let nl = 0, ns = 0;
     stones.forEach((st, i) => {
       const sp = st.spot;
-      const w = sp ? sp.w : 1, h = sp ? sp.h : 1, d = sp ? sp.d : 1;
+      const w = st.size.x || 1, h = st.size.y || 1, d = st.size.z || 1;
       this.q.setFromEuler(st.r);
       this.s.set(w * st.alive, h * st.alive, d * st.alive);
       this.m.compose(st.p, this.q, this.s);
@@ -451,7 +534,9 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
       this.aMisc.setXY(i, sp ? sp.glyph : 0, st.seed);
       if (sp?.vine && st.alive > 0.05) {
         /* vines only show once the stone is out of the ground */
-        this.m2.compose(st.p, this.q, this.s.setScalar(st.alive * (1 - st.bury)));
+        /* and grow with the stone while it changes size */
+        const k = st.alive * (1 - st.bury);
+        this.m2.compose(st.p, this.q, this.s.set(k * w / sp.w, k * h / sp.h, k * d / sp.d));
         for (const sm of sp.vine.stem) {
           if (ns >= MAX_STEMS) break;
           this.stemMesh.setMatrixAt(ns++, this.m.multiplyMatrices(this.m2, sm));
@@ -481,15 +566,20 @@ diffuseColor.rgb *= mix(.12, 1., vDepth * vDepth);`);
     this.lamp.position.set(this.pointer.x, this.pointer.y, 1.4);
     this.lamp.intensity += ((this.pointer.has ? 1.8 * PI : 0) - this.lamp.intensity) * Math.min(1, dt * 5);
 
-    /* camera: a slight three-quarter view that follows the pointer, plus a little shake when stones land */
+    /*
+     * camera: a slight three-quarter view that looks where the pointer goes (up towards the sky, out to the sides),
+     * easing after it, with only a little sway of its own, plus a little shake when stones land
+     */
     this.field.shake = Math.max(0, this.field.shake - dt * 0.5);
     const shake = this.field.shake, par = this.reduced ? 0 : 1;
+    this.gaze.lerp(this.ndc, Math.min(1, dt * 3));
     this.camera.position.set(
-      this.camBase.x + this.ndc.x * 1.4 * par + (Math.random() - 0.5) * shake,
-      this.camBase.y + this.ndc.y * 0.8 * par + (Math.random() - 0.5) * shake,
+      /* the shake is a smooth wobble, not a fresh random jolt every frame, so the far sky doesn't flicker */
+      this.camBase.x + this.gaze.x * 0.6 * par + Math.sin(this.time * 41) * shake * 0.5,
+      this.camBase.y + this.gaze.y * 0.25 * par + Math.sin(this.time * 53 + 1.7) * shake * 0.5,
       this.camBase.z,
     );
-    this.camera.lookAt(this.look);
+    this.camera.lookAt(this.look.x + this.gaze.x * 1.6 * par, this.look.y + this.gaze.y * 2.6 * par, this.look.z);
     this.camera.updateMatrixWorld();
     this.sky.update(dt, this.camera, this.pointer.has ? this.ray.ray.direction : null);
     this.renderer.render(this.scene, this.camera);
