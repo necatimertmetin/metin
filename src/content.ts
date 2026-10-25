@@ -10,7 +10,82 @@ export type Scene = {
   shapes: Shape[];
   title: Text;
   body: Text;
+  /** the camera leans up towards the sky in this scene (where the project constellations are) */
+  lookUp?: boolean;
 };
+
+/** A project, as a constellation in the upper sky: its initial in Old Turkic letters, and the panel it opens. */
+export type Project = {
+  id: string;
+  name: string;
+  /** index into the Old Turkic letters (U+10C00 + glyph) for the constellation */
+  glyph: number;
+  /** where it hangs: azimuth (0 = ahead, + right) and elevation, in degrees */
+  az: number;
+  el: number;
+  role: Text;
+  body: Text;
+  link?: { href: string; label: string };
+  /** a logo with a transparent background, in public/; when opened, the stars draw its outline instead of the name */
+  logo?: string;
+};
+
+/** The work, written in the sky. */
+export const PROJECTS: Project[] = [
+  {
+    id: "syncrosale",
+    name: "SyncroSale",
+    glyph: 0x3d,
+    az: -24,
+    el: 12,
+    role: { tr: "Tek mühendis · 2025 –", en: "Sole engineer · 2025 –" },
+    body: {
+      tr: "Amazon'da satış yapanlar için çok kiracılı bir platform: pazar yerleri arasında geçilen yönetim panoları, envanter ve fiyat takibi, depo ve kargo süreçleri, ürünleri Amazon sayfasının içinde inceleyen bir tarayıcı eklentisi ve hepsini besleyen olay tabanlı bir senkronizasyon hattı. Arayüzünden altyapısına kadar tek başıma kuruyorum.",
+      en: "A multi-tenant platform for Amazon sellers: admin dashboards that switch between marketplaces, inventory and pricing, warehouse and shipping workflows, a browser extension that analyses products right on Amazon's pages, and an event-driven sync pipeline feeding it all. I build it on my own, from the interface down to the infrastructure.",
+    },
+    link: { href: "https://syncrosale.com", label: "syncrosale.com" },
+  },
+  {
+    id: "traceco2",
+    name: "TraceCO2",
+    glyph: 0x43,
+    az: -6.5,
+    el: 10.2,
+    role: { tr: "Platform", en: "Platform" },
+    body: {
+      tr: "Avrupa'daki tüketicilerin ve markaların bir ürünün karbon ayak izini ham maddeden mağaza rafına kadar, tedarik zincirinin her adımında şeffafça izleyebildiği bir platform.",
+      en: "A platform that lets consumers and brands in Europe follow a product's carbon footprint openly, at every step of the supply chain from raw material to the shop shelf.",
+    },
+    link: { href: "https://github.com/necatimertmetin/traceco2", label: "GitHub" },
+  },
+  {
+    id: "afterlive",
+    name: "Afterlive",
+    glyph: 0x00,
+    az: 1.5,
+    el: 12.8,
+    role: { tr: "Canlı yayın platformu", en: "Live streaming platform" },
+    body: {
+      tr: "Gece hayatını ekrana taşıyan bir platform: şehrin mekânlarından gerçek zamanlı canlı yayınlar, her hafta yenilenen etkinlik takvimi ve gecenin hikâyeleri. Evde olabilirsin, ama gece hep seninle.",
+      en: "A platform that brings nightlife to the screen: real-time live streams from the city's venues, a weekly events calendar and stories from the night. You might be at home, but the night is always with you.",
+    },
+    link: { href: "https://necatimertmetin.github.io/afterlive/", label: "afterlive" },
+    logo: "logos/afterlive.png",
+  },
+  {
+    id: "padoboard",
+    name: "Padoboard",
+    glyph: 0x2f,
+    az: 11,
+    el: 11.5,
+    /* TODO: Mert to write what Padoboard is; left empty rather than guessed */
+    role: { tr: "", en: "" },
+    body: { tr: "", en: "" },
+  },
+];
+
+/** GoatCounter site code (the part before .goatcounter.com); empty sends nothing */
+export const GOATCOUNTER = "";
 
 /** The story, one scene per scroll step. */
 export const SCENES: Scene[] = [
@@ -20,6 +95,23 @@ export const SCENES: Scene[] = [
     body: {
       tr: "Hem yazı, hem taş. Bilinen ilk Türkçe metinlerden bazıları taşa kazındı. Mert Metin, frontend geliştirici.",
       en: "Text, and stone. Some of the earliest known Turkic texts were carved in stone. Mert Metin, frontend developer.",
+    },
+  },
+  {
+    /* "Mert Metin" in Orkhon letters, right to left, the e unwritten as in the inscriptions */
+    shapes: [
+      stoneText("\u{10C22}\u{10C3C}\u{10C45} \u{10C22}\u{10C45}\u{10C03}\u{10C24}", {
+        font: RUNE_FONT,
+        weight: 400,
+        outline: 0.06,
+        rows: 16,
+        maxW: 0.74,
+      }),
+    ],
+    title: { tr: "Hakkımda", en: "About" },
+    body: {
+      tr: "Trakya Üniversitesi'nde bilgisayar mühendisliği okudum. Bugün ABD'deki bir ekip için Amazon satıcılarına yönelik bir platformu uçtan uca tek başıma kuruyorum. Taşlar adımı Göktürk harfleriyle yazıyor.",
+      en: "I studied computer engineering at Trakya University. Today I build a platform for Amazon sellers end to end, on my own, for a team in the US. The stones write my name in Old Turkic letters.",
     },
   },
   {
@@ -44,9 +136,10 @@ export const SCENES: Scene[] = [
     shapes: [stele],
     title: { tr: "Projeler", en: "Projects" },
     body: {
-      tr: "Her iş bir dikilitaş: önce yazılır, sonra taşa kazınır.",
-      en: "Every piece of work a stele: written first, then carved in stone.",
+      tr: "Göğe bak: her takımyıldız bir iş. Birine dokun.",
+      en: "Look up: every constellation is a piece of work. Touch one.",
     },
+    lookUp: true,
   },
   {
     shapes: [cursorArrow],
@@ -94,6 +187,8 @@ export const UI: Record<string, Text> = {
   language: { tr: "Dil", en: "Language" },
   sound: { tr: "Ses", en: "Sound" },
   volume: { tr: "Ses seviyesi", en: "Volume" },
+  projects: { tr: "Projeler", en: "Projects" },
+  close: { tr: "Kapat", en: "Close" },
   begin: { tr: "BAŞLA", en: "BEGIN" },
   beginNote: { tr: "Sesli bir deneyim · taşa dokun", en: "An experience with sound · touch the stone" },
 };

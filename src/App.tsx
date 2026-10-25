@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RuinsScene } from './scene/RuinsScene';
-import { CONTACT, SCENES, UI, initialLang, type Lang } from './content';
+import { CONTACT, PROJECTS, SCENES, UI, initialLang, type Lang } from './content';
+import { startAnalytics, track } from './analytics';
 import { GitHubIcon, LinkedInIcon, SoundIcon } from './ui/icons';
 import { sound } from './scene/sound';
 import { Cursor } from './ui/Cursor';
@@ -16,13 +17,24 @@ export default function App() {
   const [volume, setVolume] = useState(sound.volume);
   /* nothing but the opening stone shows until the visitor strikes it */
   const [started, setStarted] = useState(false);
+  /* the project whose constellation is open in the sky, -1 for none */
+  const [project, setProject] = useState(-1);
 
-  const step = useCallback((dir: 1 | -1) => setIndex((i) => Math.min(SCENES.length - 1, Math.max(0, i + dir))), []);
+  /* moving to another scene closes any open project */
+  const go = useCallback((i: number) => { setProject(-1); setIndex(Math.min(SCENES.length - 1, Math.max(0, i))); }, []);
+  const step = useCallback((dir: 1 | -1) => { setProject(-1); setIndex((i) => Math.min(SCENES.length - 1, Math.max(0, i + dir))); }, []);
+
+  useEffect(() => { startAnalytics(); }, []);
 
   useEffect(() => {
     if (!canvas.current) return;
     try {
-      ruins.current = new RuinsScene(canvas.current, SCENES[0].shapes, { onStep: step, onStart: () => setStarted(true) });
+      ruins.current = new RuinsScene(canvas.current, SCENES[0].shapes, {
+        onStep: step,
+        onStart: () => { setStarted(true); track('start'); },
+        projects: PROJECTS.map((p) => ({ glyph: p.glyph, az: p.az, el: p.el, name: p.name.toUpperCase(), logo: p.logo && import.meta.env.BASE_URL + p.logo })),
+        onProject: setProject,
+      });
     } catch {
       setNoGL(true);
       setStarted(true);
@@ -32,14 +44,25 @@ export default function App() {
 
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
 
+  /* the sky turns to the open project; Escape closes it */
+  useEffect(() => {
+    ruins.current?.setProject(project);
+    if (project < 0) return;
+    track(`project/${PROJECTS[project].id}`);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setProject(-1); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [project]);
+
   /* the stones move right away; the caption fades out and back in with the new text */
   useEffect(() => {
-    if (index !== shown) ruins.current?.show(SCENES[index].shapes);
+    if (index !== shown) ruins.current?.show(SCENES[index].shapes, SCENES[index].lookUp);
     const t = window.setTimeout(() => setShown(index), 260);
     return () => clearTimeout(t);
   }, [index, shown]);
 
   const scene = SCENES[shown];
+  const open = project >= 0 ? PROJECTS[project] : null;
   return (
     <>
       <canvas ref={canvas} className="stage" aria-hidden="true" />
@@ -55,6 +78,16 @@ export default function App() {
             <p>{s.body[lang]}</p>
           </section>
         ))}
+        <section>
+          <h2>{UI.projects[lang]}</h2>
+          {PROJECTS.map((p) => (
+            <article key={p.id}>
+              <h3>{p.name}</h3>
+              <p>{p.role[lang]} {p.body[lang]}</p>
+              {p.link && <a href={p.link.href}>{p.link.label}</a>}
+            </article>
+          ))}
+        </section>
       </main>
 
       {!noGL && (
@@ -68,7 +101,17 @@ export default function App() {
         </>
       )}
 
-      <div className={`shell${started ? ' on' : ''}`}>
+      <div className={`shell${started ? ' on' : ''}${open ? ' panel-open' : ''}`}>
+      {open && (
+        <aside className="ui panel" role="dialog" aria-label={open.name} key={open.id}>
+          <button type="button" className="panel-close" aria-label={UI.close[lang]} onClick={() => setProject(-1)}>×</button>
+          <div className="mono panel-kicker">{UI.projects[lang]}</div>
+          <h2>{open.name}</h2>
+          {open.role[lang] && <div className="mono panel-role">{open.role[lang]}</div>}
+          {open.body[lang] && <p>{open.body[lang]}</p>}
+          {open.link && <a className="panel-link mono" href={open.link.href} target="_blank" rel="noopener">{open.link.label} ↗</a>}
+        </aside>
+      )}
       <header className="ui tl">
         <div className="mark">Mert Metin<small className="mono">{UI.role[lang]}</small></div>
       </header>
@@ -100,7 +143,7 @@ export default function App() {
       </div>
       <nav className="ui cr" aria-label={UI.scenes[lang]}>
         {SCENES.map((s, i) => (
-          <button key={i} type="button" aria-label={`${UI.scene[lang]} ${i + 1}: ${s.title[lang]}`} aria-current={i === index} onClick={() => setIndex(i)} />
+          <button key={i} type="button" aria-label={`${UI.scene[lang]} ${i + 1}: ${s.title[lang]}`} aria-current={i === index} onClick={() => go(i)} />
         ))}
       </nav>
       <div className="ui bl">

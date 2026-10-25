@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GROUND_COLOR, GROUND_EMISSIVE, GROUND_FN, GROUND_RELIEF, STONE_COLOR, STONE_EMISSIVE, STONE_RELIEF, STONE_SHAPE, STONE_VERTEX, NOISE3 } from './glsl';
 import { createGroundGeometry } from './ground';
-import { createSky } from './sky';
+import { createSky, type SkyProject } from './sky';
 import { GLYPHS, HOLES_D, HOLES_MAX_DEPTH, HOLES_W, HOLES_Z0, RUNE_FONT, createBackdrop, createEnvironment, createHoleMask, createLeafTexture, createRuneAtlas } from './textures';
 import { layStones, type Shape, type StoneSpot } from './shapes';
 import { StoneField, type Pointer } from './stones';
@@ -24,6 +24,10 @@ export type RuinsOptions = {
   onStep: (dir: 1 | -1) => void;
   /** the visitor has begun (by the opening stone, or Enter / Space) */
   onStart: () => void;
+  /** the project constellations in the sky */
+  projects?: SkyProject[];
+  /** a project constellation was touched (its index), or the open one closed (-1) */
+  onProject?: (project: number) => void;
 };
 
 /**
@@ -91,6 +95,17 @@ export class RuinsScene {
   /** where the camera is looking, easing after the pointer */
   private readonly gaze = new THREE.Vector2();
   private press: { x: number; y: number; timer: number } | null = null;
+  /** the scene leans the camera up towards the sky (the projects scene) */
+  private lookUp = false;
+  /** the project constellation under the pointer, the one pressed on, and the one open (-1 for none) */
+  private hoverProject = -1;
+  private pressProject = -1;
+  private openProject = -1;
+  /** where the camera turns to see the open project, and where it is looking now (easing between) */
+  private focusDir: THREE.Vector3 | null = null;
+  private readonly lookCur = new THREE.Vector3(0, -0.1, 0);
+  private readonly lookWant = new THREE.Vector3();
+  private readonly gazeWant = new THREE.Vector2();
   private wheelLock = 0;
   private readonly camBase = new THREE.Vector3(1.6, 0.9, CAM_Z);
   private readonly look = new THREE.Vector3(0, -0.1, 0);
@@ -160,7 +175,7 @@ export class RuinsScene {
     scene.add(this.floor);
 
     /* the night sky over it all */
-    this.sky = createSky(this.uni.uRune);
+    this.sky = createSky(this.uni.uRune, opts.projects ?? []);
     scene.add(this.sky.group);
 
 
@@ -285,7 +300,8 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
   }
 
   /** Float the stones into a shape; several shapes take turns every few seconds. */
-  show(shapes: Shape[]) {
+  show(shapes: Shape[], lookUp = false) {
+    this.lookUp = lookUp;
     this.sequence = shapes;
     this.seqIndex = 0;
     this.seqTimer = 0;
@@ -375,6 +391,13 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     sound.whoosh(1.4, 0.8);
   }
 
+  /** Open a project's constellation (the camera turns to it, it writes its name in stars), or close it with -1. */
+  setProject(project: number) {
+    this.openProject = project;
+    this.sky.focus(project);
+    this.focusDir = project >= 0 ? this.sky.gazeAt(project) : null;
+  }
+
   /** Open a hole in the ground where a stone lay: cut it out of the ground and set a pit of the stone's size under it. */
   private addPit(x: number, y: number, z: number, w: number, d: number, depth: number, angle: number) {
     if (this.pitMesh.count >= MAX_PITS) return;
@@ -429,6 +452,12 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
   };
   private readonly onLeave = () => { this.pointer.has = false; };
   private readonly onDown = (e: PointerEvent) => {
+    /* on a project constellation, or while one is open, a press is a click, never the start of a drop */
+    if (this.hoverProject >= 0 || this.openProject >= 0) {
+      this.pressProject = this.hoverProject;
+      this.press = { x: e.clientX, y: e.clientY, timer: 0 };
+      return;
+    }
     const timer = window.setTimeout(() => { if (!this.introDone) return; this.held = true; this.canvas.classList.add('held'); this.drop(); }, e.pointerType === 'mouse' ? 140 : 280);
     this.press = { x: e.clientX, y: e.clientY, timer };
   };
@@ -436,6 +465,17 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
     if (!this.press) return;
     clearTimeout(this.press.timer);
     const dy = e.clientY - this.press.y, dx = e.clientX - this.press.x;
+    if (this.pressProject >= 0 || this.openProject >= 0) {
+      /* a click opens the constellation pressed on, or anywhere else closes the open one */
+      if (Math.hypot(dx, dy) < 14) {
+        if (this.pressProject >= 0 && this.pressProject === this.hoverProject) this.opts.onProject?.(this.pressProject);
+        else if (this.openProject >= 0) this.opts.onProject?.(-1);
+      }
+      this.pressProject = -1;
+      this.press = null;
+      if (e.pointerType !== 'mouse') this.pointer.has = false;
+      return;
+    }
     if (this.started && !this.held && e.pointerType !== 'mouse' && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) this.opts.onStep(dy < 0 ? 1 : -1);
     if (this.held) { this.held = false; this.rise(); }
     this.press = null;
@@ -587,15 +627,23 @@ diffuseColor.rgb *= mix(.12, 1., vShade * vShade);`);
      */
     this.field.shake = Math.max(0, this.field.shake - dt * 0.5);
     const shake = this.field.shake, par = this.reduced ? 0 : 1;
-    this.gaze.lerp(this.ndc, Math.min(1, dt * 3));
+    /* in the projects scene the gaze leans up, towards the constellations */
+    this.gazeWant.set(this.ndc.x, Math.min(1.35, this.ndc.y + (this.lookUp ? 1 : 0)));
+    this.gaze.lerp(this.gazeWant, Math.min(1, dt * 3));
     this.camera.position.set(
       /* the shake is a smooth wobble, not a fresh random jolt every frame, so the far sky doesn't flicker */
       this.camBase.x + this.gaze.x * 0.6 * par + Math.sin(this.time * 41) * shake * 0.5,
       this.camBase.y + this.gaze.y * 0.25 * par + Math.sin(this.time * 53 + 1.7) * shake * 0.5,
       this.camBase.z,
     );
-    this.camera.lookAt(this.look.x + this.gaze.x * 1.6 * par, this.look.y + this.gaze.y * 2.6 * par, this.look.z);
+    /* with a project open it turns to that constellation instead */
+    if (this.focusDir) this.lookWant.copy(this.camera.position).addScaledVector(this.focusDir, 14);
+    else this.lookWant.set(this.look.x + this.gaze.x * 1.6 * par, this.look.y + this.gaze.y * 2.6 * par, this.look.z);
+    this.lookCur.lerp(this.lookWant, Math.min(1, dt * (this.focusDir ? 2.2 : 6)));
+    this.camera.lookAt(this.lookCur);
     this.camera.updateMatrixWorld();
+    this.hoverProject = this.started && this.pointer.has ? this.sky.pick(this.ray.ray.direction) : -1;
+    this.canvas.classList.toggle('pick', this.hoverProject >= 0);
     this.sky.update(dt, this.camera, this.pointer.has ? this.ray.ray.direction : null);
     this.renderer.render(this.scene, this.camera);
   };

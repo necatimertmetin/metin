@@ -205,7 +205,71 @@ function onSky(az: number, el: number, x = 0, y = 0) {
   return fwd.addScaledVector(right, x).addScaledVector(up, y).normalize();
 }
 
-export function createSky(uRune: { value: THREE.Color }) {
+/** A project's constellation in the upper sky, to click: its initial rune, where it hangs, and the name it writes. */
+export type SkyProject = { glyph: number; az: number; el: number; name: string; logo?: string };
+
+/** Sample a word into points (about unit height, centred), for writing it in stars. */
+function wordPoints(word: string) {
+  const H = 64, cv = document.createElement('canvas'), c = cv.getContext('2d', { willReadFrequently: true })!;
+  const font = `800 ${H}px "Inter Tight", sans-serif`;
+  c.font = font;
+  c.letterSpacing = `${H * 0.12}px`;
+  cv.width = Math.ceil(c.measureText(word).width) + 16;
+  cv.height = H + 16;
+  c.font = font;
+  c.letterSpacing = `${H * 0.12}px`;
+  c.fillStyle = '#fff';
+  c.textBaseline = 'middle';
+  c.fillText(word, 8, cv.height / 2);
+  const img = c.getImageData(0, 0, cv.width, cv.height).data, pts: [number, number][] = [];
+  for (let y = 0; y < cv.height; y += 5) for (let x = (y / 5) % 2 ? 2 : 0; x < cv.width; x += 5) {
+    if (img[(y * cv.width + x) * 4 + 3] > 140) pts.push([(x - cv.width / 2) / H, (cv.height / 2 - y) / H]);
+  }
+  return pts;
+}
+
+/**
+ * Sample a logo's outline into points (about unit height, centred): the edge of its opaque shape, one point per
+ * small cell so the outline reads as an even line of stars. Loaded once per logo.
+ */
+const logoCache = new Map<string, Promise<[number, number][]>>();
+function logoPoints(url: string) {
+  let p = logoCache.get(url);
+  if (!p) {
+    p = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const H = 120, W = Math.round((img.width / img.height) * H) || H;
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        const c = cv.getContext('2d', { willReadFrequently: true })!;
+        c.drawImage(img, 0, 0, W, H);
+        const a = c.getImageData(0, 0, W, H).data, on = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && a[(y * W + x) * 4 + 3] > 128;
+        const cell = 4, taken = new Set<number>(), pts: [number, number][] = [];
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          if (!on(x, y) || (on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1))) continue;
+          const k = Math.floor(x / cell) + Math.floor(y / cell) * 1000;
+          if (taken.has(k)) continue;
+          taken.add(k);
+          pts.push([(x - W / 2) / H, (H / 2 - y) / H]);
+        }
+        resolve(pts);
+      };
+      img.onerror = () => resolve([]);
+      img.src = url;
+    });
+    logoCache.set(url, p);
+  }
+  return p;
+}
+
+export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] = []) {
+  /* the Teŋri word first, then one constellation per project */
+  const ALL = [
+    ...CONSTELLATIONS.map((k) => ({ ...k, project: -1 })),
+    ...projects.map((p, i) => ({ glyph: p.glyph, az: p.az, el: p.el, size: 4.6, project: i })),
+  ];
+  const N = ALL.length;
   const group = new THREE.Group();
   const uTime = { value: 0 };
 
@@ -224,35 +288,39 @@ export function createSky(uRune: { value: THREE.Color }) {
   group.add(dome);
 
   /* the constellations (drawn in the transparent pass, so they test depth and stay behind the stones): their stars as points, their letters as lines, each lit by how near the pointer is */
-  const lit = CONSTELLATIONS.map(() => ({ value: 0 }));
+  const lit = ALL.map(() => ({ value: 0 }));
+  /* the constellation opened, if any: it shines, the rest dim */
+  let focused = -1;
+  const uDim = { value: 0 };
   /* the constellations stay hidden until the visitor begins, then fade in */
   const uShow = { value: 0 };
   let showTarget = 0;
-  const centres = CONSTELLATIONS.map((k) => onSky(k.az, k.el));
+  const centres = ALL.map((k) => onSky(k.az, k.el));
   const starMat = new THREE.ShaderMaterial({
-    uniforms: { uRune, uShow, uLit: { value: lit.map((l) => l.value) } },
+    uniforms: { uRune, uShow, uDim, uFocus: { value: -1 }, uLit: { value: lit.map((l) => l.value) } },
     vertexShader: /* glsl */ `
-      attribute float aK; uniform float uLit[4];
+      attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim;
       varying float vLit;
       void main() {
-        vLit = uLit[int(aK)];
+        vLit = uLit[int(aK)] * (abs(aK - uFocus) < .5 ? 1. : 1. - uDim);
         gl_PointSize = 5. + vLit * 3.;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uRune; uniform float uShow; varying float vLit;
+      uniform vec3 uRune; uniform float uShow; uniform float uDim; varying float vLit;
       void main() {
         float d = length(gl_PointCoord - .5);
-        float a = smoothstep(.5, .05, d) * (.8 + vLit * .2) * uShow;
+        float a = smoothstep(.5, .05, d) * (.8 + vLit * .2) * uShow * (1. - uDim * .55 * (1. - vLit));
         gl_FragColor = vec4(mix(vec3(.92, .95, 1.), uRune * 1.4 + .35, .35 + vLit * .65) * a, a);
       }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const lineMat = new THREE.ShaderMaterial({
-    uniforms: { uRune, uShow, uLit: starMat.uniforms.uLit },
-    vertexShader: 'attribute float aK; uniform float uLit[4]; varying float vLit; void main() { vLit = uLit[int(aK)]; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
-    /* always faintly drawn, bright when lit */
-    fragmentShader: 'uniform vec3 uRune; uniform float uShow; varying float vLit; void main() { float a = (.42 + vLit * .58) * uShow; gl_FragColor = vec4(uRune * a, a); }',
+    uniforms: { uRune, uShow, uDim, uFocus: starMat.uniforms.uFocus, uLit: starMat.uniforms.uLit },
+    vertexShader: `attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; varying float vLit; varying float vMine;
+      void main() { vMine = abs(aK - uFocus) < .5 ? 1. : 0.; vLit = uLit[int(aK)] * (vMine > .5 ? 1. : 1. - uDim); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    /* always faintly drawn, bright when lit; while one is open the others fade */
+    fragmentShader: 'uniform vec3 uRune; uniform float uShow; uniform float uDim; varying float vLit; varying float vMine; void main() { float a = (.42 + vLit * .58) * uShow * mix(1. - uDim * .7, 1., vMine); gl_FragColor = vec4(uRune * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const stars = new THREE.Points(new THREE.BufferGeometry(), starMat);
@@ -290,7 +358,7 @@ export function createSky(uRune: { value: THREE.Color }) {
   /** Lay the constellations out again; call once the rune font has loaded, since the shapes come from it. */
   const build = () => {
     const sp: number[] = [], sk: number[] = [], lp: number[] = [], lk: number[] = [];
-    CONSTELLATIONS.forEach((k, ki) => {
+    ALL.forEach((k, ki) => {
       const { pts, lines: strokes } = runeGraph(GLYPHS[k.glyph]), scale = Math.tan(THREE.MathUtils.degToRad(k.size));
       const at = pts.map(([x, y]) => onSky(k.az, k.el, x * scale, y * scale).multiplyScalar(R * 0.98));
       at.forEach((v) => { sp.push(v.x, v.y, v.z); sk.push(ki); });
@@ -319,6 +387,52 @@ export function createSky(uRune: { value: THREE.Color }) {
   let meteorT = -1, meteorNext = 20 + Math.random() * 30;
   const mFrom = new THREE.Vector3(), mDir = new THREE.Vector3();
 
+  /* a project's name, written in stars that fly out of its constellation and settle beneath it */
+  const nameMat = new THREE.ShaderMaterial({
+    uniforms: { uRune, uT: { value: 0 }, uFade: { value: 0 } },
+    vertexShader: /* glsl */ `
+      attribute vec3 aFrom; attribute float aDelay; uniform float uT; varying float vK;
+      void main() {
+        float k = clamp((uT - aDelay) / 1.1, 0., 1.);
+        vK = k;
+        k = k * k * (3. - 2. * k);
+        vec3 p = mix(aFrom, position, k) + normalize(position) * sin(k * 3.14159) * -1.2;
+        gl_PointSize = 2.6 + (1. - k) * 2.;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+      }`,
+    fragmentShader: 'uniform vec3 uRune; uniform float uFade; varying float vK; void main() { float a = smoothstep(.5, .05, length(gl_PointCoord - .5)) * uFade * (.35 + vK * .65); gl_FragColor = vec4(mix(uRune * 1.5 + .2, vec3(1., .98, .95), vK) * a, a); }',
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const nameStars = new THREE.Points(new THREE.BufferGeometry(), nameMat);
+  nameStars.renderOrder = -9;
+  nameStars.frustumCulled = false;
+  group.add(nameStars);
+  let nameTarget = 0;
+  const writeName = async (ki: number) => {
+    const k = ALL[ki], project = projects[k.project], word = project?.name ?? '';
+    /* a logo's outline if it has one (drawn larger), else its name */
+    const logo = project?.logo ? await logoPoints(project.logo) : [];
+    if (focused !== ki) return;
+    const shape = logo.length ? logo : wordPoints(word), height = logo.length ? 4.2 : 2.1;
+    const from = (stars.geometry.attributes.position?.array ?? []) as ArrayLike<number>;
+    const aK = stars.geometry.attributes.aK?.array as ArrayLike<number> | undefined;
+    const mine: THREE.Vector3[] = [];
+    if (aK) for (let i = 0; i < aK.length; i++) if (aK[i] === ki) mine.push(new THREE.Vector3(from[i * 3], from[i * 3 + 1], from[i * 3 + 2]));
+    const scale = Math.tan(THREE.MathUtils.degToRad(height)), to: number[] = [], fr: number[] = [], dl: number[] = [];
+    shape.forEach(([x, y], i) => {
+      const v = onSky(k.az, k.el - k.size * 0.5 - height * 0.62, x * scale, y * scale).multiplyScalar(R * 0.975);
+      const f = mine.length ? mine[i % mine.length] : v;
+      to.push(v.x, v.y, v.z); fr.push(f.x, f.y, f.z); dl.push((x + 3) * 0.12 + Math.random() * 0.25);
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(to, 3));
+    g.setAttribute('aFrom', new THREE.Float32BufferAttribute(fr, 3));
+    g.setAttribute('aDelay', new THREE.Float32BufferAttribute(dl, 1));
+    nameStars.geometry.dispose();
+    nameStars.geometry = g;
+    nameMat.uniforms.uT.value = 0;
+  };
+
   const ray = new THREE.Vector3(), world = new THREE.Vector3();
   /** Keep the sky around the camera, turn it, light the constellations near `pointerDir` (null when no pointer). */
   const update = (dt: number, camera: THREE.Camera, pointerDir: THREE.Vector3 | null) => {
@@ -332,9 +446,13 @@ export function createSky(uRune: { value: THREE.Color }) {
     centres.forEach((c, i) => {
       world.copy(c);
       const near = pointerDir ? THREE.MathUtils.smoothstep(ray.copy(pointerDir).dot(world), Math.cos(0.11), Math.cos(0.05)) : 0;
-      lit[i].value += (near - lit[i].value) * Math.min(1, dt * (near > lit[i].value ? 3 : 0.8));
+      const want = i === focused ? 1 : near;
+      lit[i].value += (want - lit[i].value) * Math.min(1, dt * (want > lit[i].value ? 3 : 0.8));
       starMat.uniforms.uLit.value[i] = lit[i].value;
     });
+    uDim.value += ((focused >= 0 ? 1 : 0) - uDim.value) * Math.min(1, dt * 2);
+    nameMat.uniforms.uT.value += dt;
+    nameMat.uniforms.uFade.value += (nameTarget - nameMat.uniforms.uFade.value) * Math.min(1, dt * (nameTarget ? 2 : 4));
     /* shooting star */
     meteorNext -= dt;
     if (meteorNext <= 0 && meteorT < 0) {
@@ -353,5 +471,31 @@ export function createSky(uRune: { value: THREE.Color }) {
     }
   };
 
-  return { group, update, rebuild: build, show: () => { showTarget = 1; } };
+  /** The project whose constellation is under `pointerDir`, or -1. */
+  const pick = (pointerDir: THREE.Vector3 | null) => {
+    if (!pointerDir || uShow.value < 0.5) return -1;
+    let best = -1, bestDot = Math.cos(0.075);
+    ALL.forEach((k, i) => {
+      if (k.project < 0) return;
+      const d = pointerDir.dot(centres[i]);
+      if (d > bestDot) { bestDot = d; best = k.project; }
+    });
+    return best;
+  };
+
+  /** Open a project's constellation (it shines and writes its name; the rest dim), or close it with -1. */
+  const focus = (project: number) => {
+    focused = project < 0 ? -1 : ALL.findIndex((k) => k.project === project);
+    starMat.uniforms.uFocus.value = focused;
+    if (focused >= 0) { void writeName(focused); nameTarget = 1; } else nameTarget = 0;
+  };
+
+  /** Where to look to see a project's constellation and the name under it. */
+  const gazeAt = (project: number) => {
+    const k = ALL.find((c) => c.project === project);
+    /* a little to the right of it, so it sits left of the panel that opens on the right */
+    return k ? onSky(k.az + 8, k.el - k.size * 0.55) : null;
+  };
+
+  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, focus, gazeAt };
 }
