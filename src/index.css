@@ -28,6 +28,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .cursor span { display: block; transform: translate(-50%, -50%) rotate(-15deg); font-family: 'Noto Sans Old Turkic', sans-serif; font-size: 26px; line-height: 1; color: var(--rune); text-shadow: 0 0 6px var(--rune), 0 0 16px rgba(63, 224, 208, 0.45); transition: transform 0.15s, filter 0.15s; }
 .cursor.down span { transform: translate(-50%, -50%) rotate(-15deg) scale(0.8); filter: brightness(1.6); animation: cursor-turn 3.2s linear 0.3s infinite; }
 @keyframes cursor-turn { to { transform: translate(-50%, -50%) rotate(345deg) scale(0.8); } }
+.cursor.hot span { transform: translate(-50%, -50%) rotate(-15deg) scale(1.35); filter: brightness(1.5); }
 @media (prefers-reduced-motion: reduce) { .cursor.down span { animation: none; } }
 .fallback { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; font-family: var(--display); font-weight: 800; font-size: clamp(3rem, 14vw, 12rem); line-height: 0.86; letter-spacing: -0.05em; padding: 24px; }
 
@@ -65,6 +66,18 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .langs button { padding: 6px 10px; border-radius: 999px; color: var(--muted); border: 1px solid transparent; }
 .langs button[aria-pressed='true'] { color: var(--fg); border-color: var(--line); }
 
+/* a project, opened from its constellation: a quiet glass panel on the right */
+.panel { right: max(28px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); width: min(380px, 86vw); padding: 28px 28px 26px; background: rgba(11, 12, 14, 0.62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 14px; animation: panel-in 0.7s 0.5s both; }
+@keyframes panel-in { from { opacity: 0; transform: translateY(-50%) translateX(16px); } to { opacity: 1; transform: translateY(-50%); } }
+.panel h2 { margin: 6px 0 4px; font-family: var(--display); font-size: 30px; font-weight: 800; letter-spacing: -0.035em; line-height: 1; }
+.panel p { margin: 14px 0 0; color: #c9c6bf; }
+.panel-kicker { color: var(--rune); }
+.panel-role { color: var(--muted); }
+.panel-link { display: inline-block; margin-top: 18px; color: var(--rune); }
+.panel-link:hover { text-decoration: underline; }
+.panel-close { position: absolute; top: 12px; right: 14px; width: 32px; height: 32px; font-size: 22px; line-height: 1; color: var(--muted); border-radius: 999px; }
+.panel-close:hover { color: var(--fg); }
+.shell.panel-open .cr { opacity: 0; pointer-events: none; }
 .cap { transition: opacity 0.5s; }
 .cap.fade { opacity: 0; }
 .cap .idx { color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
@@ -82,6 +95,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .soc svg { width: 20px; height: 20px; }
 
 @media (max-width: 760px) {
+  .panel { left: 16px; right: 16px; top: auto; bottom: 16px; width: auto; transform: none; animation-name: panel-up; }
+  @keyframes panel-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
   .bc, .cr, .br .mail { display: none; }
   .cap b { font-size: 20px; }
   .cap span { font-size: 13px; }

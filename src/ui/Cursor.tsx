@@ -13,6 +13,8 @@ export function Cursor() {
   const el = useRef<HTMLDivElement>(null);
   const [pressed, setPressed] = useState(false);
   const [shown, setShown] = useState(false);
+  /* over a constellation that can be opened */
+  const [hot, setHot] = useState(false);
 
   useEffect(() => {
     if (!window.matchMedia('(pointer: fine)').matches) return;
@@ -26,7 +28,9 @@ export function Cursor() {
     };
     const move = (e: PointerEvent) => {
       to.x = e.clientX; to.y = e.clientY;
-      setShown((e.target as Element | null)?.classList?.contains('stage') ?? false);
+      const t = e.target as Element | null;
+      setShown(t?.classList?.contains('stage') ?? false);
+      setHot(t?.classList?.contains('pick') ?? false);
     };
     const down = (e: PointerEvent) => {
       if (!(e.target as Element | null)?.classList?.contains('stage')) return;
@@ -49,7 +53,7 @@ export function Cursor() {
   }, []);
 
   return (
-    <div ref={el} className={`cursor${shown ? ' on' : ''}${pressed ? ' down' : ''}`} aria-hidden="true">
+    <div ref={el} className={`cursor${shown ? ' on' : ''}${pressed ? ' down' : ''}${hot ? ' hot' : ''}`} aria-hidden="true">
       <span>{GLYPH}</span>
     </div>
   );
