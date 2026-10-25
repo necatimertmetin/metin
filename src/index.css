@@ -50,6 +50,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .mark { font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: -0.04em; text-transform: uppercase; line-height: 0.9; }
 .mark small { display: block; font-size: 10px; font-weight: 400; color: var(--muted); margin-top: 6px; letter-spacing: 0.12em; }
 .tr { display: flex; align-items: center; gap: 6px; }
+.sound-wrap { display: flex; align-items: center; }
+/* the volume slider: folded away, it opens beside the speaker on hover or keyboard focus */
+.vol { width: 0; opacity: 0; margin: 0; transition: width 0.25s, opacity 0.2s, margin 0.25s; -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+.sound-wrap:hover .vol, .sound-wrap:focus-within .vol { width: 84px; opacity: 1; margin-right: 6px; }
+.vol::-webkit-slider-runnable-track { height: 2px; background: var(--line); border-radius: 2px; }
+.vol::-moz-range-track { height: 2px; background: var(--line); border-radius: 2px; }
+.vol::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px; border-radius: 50%; background: var(--rune); box-shadow: 0 0 6px var(--rune); }
+.vol::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--rune); box-shadow: 0 0 6px var(--rune); }
 .sound { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 999px; color: var(--muted); transition: color 0.2s; }
 .sound:hover, .sound[aria-pressed='true'] { color: var(--fg); }
 .sound svg { width: 18px; height: 18px; }

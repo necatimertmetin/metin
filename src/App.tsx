@@ -13,6 +13,7 @@ export default function App() {
   const [shown, setShown] = useState(0);
   const [noGL, setNoGL] = useState(false);
   const [soundOn, setSoundOn] = useState(sound.enabled);
+  const [volume, setVolume] = useState(sound.volume);
   /* nothing but the opening stone shows until the visitor strikes it */
   const [started, setStarted] = useState(false);
 
@@ -72,10 +73,25 @@ export default function App() {
         <div className="mark">Mert Metin<small className="mono">{UI.role[lang]}</small></div>
       </header>
       <div className="ui tr">
-        <button type="button" className="sound" aria-pressed={soundOn} aria-label={UI.sound[lang]} title={UI.sound[lang]}
-          onClick={() => { sound.setEnabled(!soundOn); setSoundOn(!soundOn); }}>
-          <SoundIcon on={soundOn} />
-        </button>
+        {/* the speaker mutes; hovering it (or tabbing to it) opens a volume slider beside it */}
+        <div className="sound-wrap">
+          <input type="range" className="vol" min={0} max={1} step={0.01} value={soundOn ? volume : 0} aria-label={UI.volume[lang]}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              sound.setVolume(v);
+              setVolume(v);
+              if ((v > 0) !== soundOn) { sound.setEnabled(v > 0); setSoundOn(v > 0); }
+            }} />
+          <button type="button" className="sound" aria-pressed={soundOn} aria-label={UI.sound[lang]} title={UI.sound[lang]}
+            onClick={() => {
+              const on = !soundOn;
+              if (on && volume === 0) { sound.setVolume(0.6); setVolume(0.6); }
+              sound.setEnabled(on);
+              setSoundOn(on);
+            }}>
+            <SoundIcon on={soundOn && volume > 0} />
+          </button>
+        </div>
         <span className="langs mono" role="group" aria-label={UI.language[lang]}>
           {(['tr', 'en'] as const).map((l) => (
             <button key={l} type="button" aria-pressed={lang === l} onClick={() => setLang(l)}>{l.toUpperCase()}</button>
