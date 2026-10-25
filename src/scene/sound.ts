@@ -5,14 +5,22 @@
  */
 
 const STORE = 'metin-sound';
+const VOLUME = 'metin-volume';
+/* the master gain at full volume */
+const LOUD = 0.8;
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noise: AudioBuffer | null = null;
 let enabled = readEnabled();
+let volume = readVolume();
 let lastHit = 0;
 let lastTick = 0;
 let lastCrack = 0;
+
+function readVolume() {
+  try { const v = parseFloat(localStorage.getItem(VOLUME) ?? ''); return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; } catch { return 1; }
+}
 
 function readEnabled() {
   try { return localStorage.getItem(STORE) !== 'off'; } catch { return true; }
@@ -156,7 +164,7 @@ function ensure() {
   master.gain.value = 0;
   master.connect(ctx.destination);
   startAmbience(ctx, master);
-  master.gain.linearRampToValueAtTime(0.8, ctx.currentTime + 3);
+  master.gain.linearRampToValueAtTime(LOUD * volume, ctx.currentTime + 3);
 }
 
 /** A sound that lives for `dur` seconds, panned by `pan` (-1 left to 1 right). */
@@ -172,6 +180,14 @@ const live = () => !!ctx && enabled && ctx.state === 'running';
 
 export const sound = {
   get enabled() { return enabled; },
+  get volume() { return volume; },
+
+  /** Set the volume, 0 to 1, and remember it. */
+  setVolume(v: number) {
+    volume = Math.min(1, Math.max(0, v));
+    try { localStorage.setItem(VOLUME, String(volume)); } catch { /* private mode: just not remembered */ }
+    if (ctx && master) master.gain.setTargetAtTime(LOUD * volume, ctx.currentTime, 0.05);
+  },
 
   /** Turn all sound on or off, and remember the choice. */
   setEnabled(on: boolean) {
