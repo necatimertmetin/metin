@@ -4,35 +4,38 @@ import { GLYPHS, RUNE_FONT } from './textures';
 
 /*
  * The night sky: a dark dome that meets the fog at the horizon, faint stars in two layers, a whisper of the Milky Way,
- * a shooting star now and then, and six constellations shaped like Orkhon runes, always faintly drawn in rune light;
- * bring the pointer near one and it lights up fully. The sky holds still.
+ * a shooting star now and then, and four constellations that write 𐱅𐰭𐰼𐰃, Teŋri, the sky god, across the sky in
+ * Orkhon letters, right to left. Their shapes come from the letters of the Old Turkic font; the constellations
+ * themselves are this site's invention. They are always faintly drawn in rune light; bring the pointer near one and
+ * it lights up. At the very top, seen only when looking up, the crescent and star of the Turkish flag. The sky holds still.
  */
 
 const R = 70;
 /*
  * runes for the constellations, and where they hang: azimuth (0 = straight ahead, +right) and elevation, in degrees.
- * The camera sees only about 11° above the horizon on a wide screen, so they hang low.
+ * The camera sees only about 11° above the horizon on a wide screen, so they hang low; and it looks about 6.5° to the
+ * left of straight ahead (its three-quarter view), so the word is centred there.
  */
 const CONSTELLATIONS: { glyph: number; az: number; el: number; size: number }[] = [
-  { glyph: 0x45, az: -19, el: 5.4, size: 6 },
-  { glyph: 0x0b, az: -6, el: 7.2, size: 4.8 },
-  { glyph: 0x22, az: 7.5, el: 6.8, size: 5.4 },
-  { glyph: 0x3c, az: 20, el: 5.2, size: 5.6 },
-  { glyph: 0x1a, az: -31, el: 3.6, size: 5 },
-  { glyph: 0x2d, az: 32, el: 3.8, size: 5 },
+  { glyph: 0x45, az: 12.5, el: 6.4, size: 5.4 },
+  { glyph: 0x2d, az: 0, el: 7.2, size: 5 },
+  { glyph: 0x3c, az: -13, el: 6.9, size: 5.2 },
+  { glyph: 0x03, az: -25.5, el: 6.2, size: 5 },
 ];
 
 const SKY_FRAG = /* glsl */ `
 ${NOISE3}
-uniform float uTime;
+uniform float uTime; uniform vec3 uBandN; uniform vec3 uCore;
 varying vec3 vDir;
 float starLayer(vec3 d, float scale, float density, float size) {
   vec3 p = d * scale, c = floor(p);
   float h = h3(c);
   vec3 o = vec3(h3(c + 11.), h3(c + 23.), h3(c + 37.)) * .7 + .15;
   float dist = length(p - c - o);
-  float px = fwidth(p.x) + fwidth(p.y);
-  float s = smoothstep(size + px, size * .2, dist) * step(1. - density, h);
+  /* never smaller than a pixel, or a star blinks as the camera moves; a star drawn bigger is dimmed to match */
+  float px = (fwidth(p.x) + fwidth(p.y)) * .5;
+  float r = max(size, px * .9);
+  float s = smoothstep(r + px * .5, r * .3, dist) * step(1. - density, h) * min(1., (size / r) * (size / r) * 2.6);
   return s * (.3 + .7 * fract(h * 17.));
 }
 void main() {
@@ -40,13 +43,19 @@ void main() {
   float el = d.y;
   /* deep night, a little less dark towards the horizon where it meets the fog */
   vec3 col = mix(vec3(.014, .016, .021), vec3(.003, .0035, .006), smoothstep(-.06, .25, el));
-  /* the Milky Way: a faint dusty band across the sky */
-  float band = exp(-pow(dot(d, normalize(vec3(.55, .45, -.7))) * 3.2, 2.));
-  float dust = fbm3(d * 6.) * .7 + fbm3(d * 18.) * .3;
-  col += vec3(.035, .035, .045) * band * smoothstep(.35, .8, dust);
-  col *= 1. - band * smoothstep(.55, .75, fbm3(d * 9. + 4.)) * .5;
-  /* stars: many faint ones, fewer brighter ones, more of both along the band; none down in the haze */
-  float stars = starLayer(d, 260., .05 + band * .08, .07) * .45 + starLayer(d, 90., .03, .06) * .9;
+  /* the Milky Way, corner to corner across the sky: violet dusty clouds, a warmer glow towards its core low on the right,
+     dark lanes of dust down its middle, and a wide faint haze around it all; it wanders a little, as the real one does */
+  float bd = dot(d, uBandN) + (fbm3(d * 3. + 2.) - .5) * .08;
+  float band = exp(-pow(bd / .15, 2.)), haze = exp(-pow(bd / .32, 2.));
+  float core = pow(max(dot(d, uCore), 0.), 30.);
+  float clouds = fbm3(d * 7.) * .6 + fbm3(d * 19. + 3.) * .4;
+  float lanes = smoothstep(.47, .7, fbm3(d * 11. + 9.)) * exp(-pow(bd / .06, 2.));
+  vec3 tint = mix(vec3(.017, .015, .03), vec3(.04, .028, .03), min(1., core * 1.3));
+  vec3 mw = tint * (band * smoothstep(.3, .75, clouds) * 1.1 + haze * .15) * (1. + core * 1.2) * (1. - lanes * .75);
+  col += mw * smoothstep(-.06, .08, el);
+  /* stars: many faint ones, fewer brighter ones, and a dense dust of tiny ones along the band; none down in the haze */
+  float stars = starLayer(d, 260., .05 + band * .2, .07) * .45 + starLayer(d, 520., band * .35 * (1. - lanes), .07) * .4
+              + starLayer(d, 90., .03, .06) * .9;
   col += vec3(.85, .88, 1.) * stars * smoothstep(-.07, .03, el);
   gl_FragColor = vec4(col, 1.);
   #include <tonemapping_fragment>
@@ -54,43 +63,137 @@ void main() {
 }
 `;
 
-/** The points of a rune: farthest-point samples of its drawn strokes, about 2-D unit size, y up. */
-function runePoints(glyph: string, n: number) {
-  const s = 96, cv = document.createElement('canvas');
-  cv.width = cv.height = s;
+/**
+ * A rune as a constellation that follows its real strokes: the letter is drawn with the Old Turkic font, thinned to a
+ * one-pixel skeleton (Zhang-Suen), and the skeleton traced into strokes; stars go at the stroke ends, joints and bends,
+ * lines along the strokes. Points are in about unit size, centred, y up.
+ */
+function runeGraph(glyph: string) {
+  const S = 128, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
   const c = cv.getContext('2d', { willReadFrequently: true })!;
   c.fillStyle = '#fff';
-  c.font = `${s * 0.8}px ${RUNE_FONT}`;
+  c.font = `${S * 0.78}px ${RUNE_FONT}`;
   c.textAlign = 'center';
   c.textBaseline = 'middle';
-  c.fillText(glyph, s / 2, s / 2);
-  const img = c.getImageData(0, 0, s, s).data, ink: [number, number][] = [];
-  for (let y = 0; y < s; y += 2) for (let x = 0; x < s; x += 2) if (img[(y * s + x) * 4 + 3] > 128) ink.push([x, y]);
-  if (!ink.length) return [];
-  const pts = [ink[0]], best = ink.map(() => Infinity);
-  while (pts.length < n) {
-    const [lx, ly] = pts[pts.length - 1];
-    let far = 0;
-    ink.forEach(([x, y], i) => { best[i] = Math.min(best[i], (x - lx) ** 2 + (y - ly) ** 2); if (best[i] > best[far]) far = i; });
-    pts.push(ink[far]);
+  c.fillText(glyph, S / 2, S / 2);
+  const img = c.getImageData(0, 0, S, S).data;
+  const on = new Uint8Array(S * S);
+  for (let i = 0; i < S * S; i++) on[i] = img[i * 4 + 3] > 110 ? 1 : 0;
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= S || y >= S ? 0 : on[y * S + x]);
+  /* Zhang-Suen thinning */
+  const N = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const pass of [0, 1]) {
+      const kill: number[] = [];
+      for (let y = 1; y < S - 1; y++) for (let x = 1; x < S - 1; x++) {
+        if (!on[y * S + x]) continue;
+        const v = N.map(([dx, dy]) => at(x + dx, y + dy));
+        const b = v.reduce((a, q) => a + q, 0);
+        let t = 0;
+        for (let k = 0; k < 8; k++) if (!v[k] && v[(k + 1) % 8]) t++;
+        const [p2, , p4, , p6, , p8] = v;
+        const ok = pass === 0 ? !(p2 && p4 && p6) && !(p4 && p6 && p8) : !(p2 && p4 && p8) && !(p2 && p6 && p8);
+        if (b >= 2 && b <= 6 && t === 1 && ok) kill.push(y * S + x);
+      }
+      for (const i of kill) on[i] = 0;
+      if (kill.length) changed = true;
+    }
   }
-  return pts.map(([x, y]) => [x / s - 0.5, 0.5 - y / s] as [number, number]);
+  /* trace the skeleton: nodes are ends and joints, strokes run between them */
+  const nb = (i: number) => N.map(([dx, dy]) => (i % S + dx) + (Math.floor(i / S) + dy) * S)
+    .filter((j) => j >= 0 && j < S * S && Math.abs((j % S) - (i % S)) <= 1 && on[j]);
+  const pix: number[] = [];
+  for (let i = 0; i < S * S; i++) if (on[i]) pix.push(i);
+  const isNode = (i: number) => nb(i).length !== 2;
+  const seen = new Set<string>(), strokes: number[][] = [], covered = new Set<number>();
+  const walk = (from: number, next: number) => {
+    const path = [from];
+    let prev = from, cur = next;
+    while (true) {
+      path.push(cur);
+      if (isNode(cur) || cur === from) break;
+      const n = nb(cur).filter((j) => j !== prev);
+      if (!n.length) break;
+      prev = cur; cur = n[0];
+    }
+    const key = [Math.min(path[0], path[path.length - 1]), Math.max(path[0], path[path.length - 1]), path[1]].join();
+    const back = [Math.min(path[0], path[path.length - 1]), Math.max(path[0], path[path.length - 1]), path[path.length - 2]].join();
+    if (seen.has(key) || seen.has(back)) return;
+    seen.add(key);
+    for (const i of path) covered.add(i);
+    strokes.push(path);
+  };
+  for (const i of pix) if (isNode(i)) for (const j of nb(i)) walk(i, j);
+  /* closed loops have no ends or joints: start them anywhere */
+  for (const i of pix) if (!covered.has(i) && nb(i).length === 2) walk(i, nb(i)[0]);
+  /* simplify each stroke to its bends (Douglas-Peucker), so stars sit at the corners */
+  const xy = (i: number): [number, number] => [i % S, Math.floor(i / S)];
+  const simplify = (p: [number, number][], eps: number): [number, number][] => {
+    if (p.length < 3) return p;
+    const [a, b] = [p[0], p[p.length - 1]];
+    let far = 0, fd = 0;
+    for (let k = 1; k < p.length - 1; k++) {
+      const d = Math.abs((b[0] - a[0]) * (a[1] - p[k][1]) - (a[0] - p[k][0]) * (b[1] - a[1])) / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1);
+      if (d > fd) { fd = d; far = k; }
+    }
+    return fd > eps ? [...simplify(p.slice(0, far + 1), eps).slice(0, -1), ...simplify(p.slice(far), eps)] : [a, b];
+  };
+  const pts: [number, number][] = [], lines: [number, number][] = [];
+  /* nearby points (a joint is a few pixels wide) become one star */
+  const star = ([x, y]: [number, number]) => {
+    const k = pts.findIndex(([px, py]) => Math.hypot(px - x, py - y) < 7);
+    if (k >= 0) return k;
+    pts.push([x, y]);
+    return pts.length - 1;
+  };
+  for (const s of strokes) {
+    if (s.length < 4) continue;
+    /* long straight runs get stars along them too, so each stroke reads as a line of stars */
+    const bends = simplify(s.map(xy), 3.2), run: [number, number][] = [bends[0]];
+    for (let k = 1; k < bends.length; k++) {
+      const [a, b] = [bends[k - 1], bends[k]], n = Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / 22);
+      for (let m = 1; m <= n; m++) run.push([a[0] + ((b[0] - a[0]) * m) / (n + 1), a[1] + ((b[1] - a[1]) * m) / (n + 1)]);
+      run.push(b);
+    }
+    const ids = run.map(star);
+    for (let k = 1; k < ids.length; k++) if (ids[k] !== ids[k - 1]) lines.push([ids[k - 1], ids[k]]);
+  }
+  return { pts: pts.map(([x, y]) => [x / S - 0.5, 0.5 - y / S] as [number, number]), lines };
 }
 
-/** The shortest set of lines joining all the points (a minimum spanning tree), so the letter reads as strokes. */
-function spanningLines(p: [number, number][]) {
-  const inTree = [0], lines: [number, number][] = [];
-  while (inTree.length < p.length) {
-    let bi = -1, bj = -1, bd = Infinity;
-    for (const i of inTree) p.forEach((q, j) => {
-      if (inTree.includes(j)) return;
-      const d = (q[0] - p[i][0]) ** 2 + (q[1] - p[i][1]) ** 2;
-      if (d < bd) { bd = d; bi = i; bj = j; }
-    });
-    lines.push([bi, bj]);
-    inTree.push(bj);
+/**
+ * The crescent and star of the Turkish flag, as a constellation: points along the outlines and the lines between them,
+ * in the flag law's proportions (outer circle 1/2, inner circle 2/5 offset 1/16, star circle 1/4 of the flag's height),
+ * opening to the right, about unit size, centred.
+ */
+function crescentAndStar() {
+  const pts: [number, number][] = [], lines: [number, number][] = [], dots: number[] = [];
+  /* lines run through every point, so curves are smooth; stars sit only on every `every`-th point */
+  const add = (path: [number, number][], closed: boolean, every: number) => {
+    const base = pts.length;
+    pts.push(...path);
+    for (let i = 1; i < path.length; i++) lines.push([base + i - 1, base + i]);
+    if (closed) lines.push([base + path.length - 1, base]);
+    path.forEach((_, i) => { if (i % every === 0) dots.push(base + i); });
+  };
+  /* the crescent: the outer circle's arc round the left, then the inner circle's arc back */
+  const r1 = 0.25, cx2 = 0.0625, r2 = 0.2;
+  const ix = (r1 * r1 - r2 * r2 + cx2 * cx2) / (2 * cx2), iy = Math.sqrt(r1 * r1 - ix * ix);
+  const a1 = Math.atan2(iy, ix), a2 = Math.atan2(iy, ix - cx2), crescent: [number, number][] = [];
+  for (let k = 0; k <= 48; k++) { const a = a1 + ((Math.PI * 2 - 2 * a1) * k) / 48; crescent.push([Math.cos(a) * r1, Math.sin(a) * r1]); }
+  for (let k = 39; k >= 1; k--) { const a = a2 + ((Math.PI * 2 - 2 * a2) * k) / 40; crescent.push([cx2 + Math.cos(a) * r2, Math.sin(a) * r2]); }
+  add(crescent, true, 5);
+  /* the star: five points, one aimed back at the crescent */
+  const sx = cx2 + r2 + 0.0833 + 0.125 * 0.62, sr = 0.125, star: [number, number][] = [];
+  for (let k = 0; k < 10; k++) {
+    const a = Math.PI + (k * Math.PI) / 5, r = k % 2 ? sr * 0.382 : sr;
+    star.push([sx + Math.cos(a) * r, Math.sin(a) * r]);
   }
-  return lines;
+  add(star, true, 1);
+  const mid = (-r1 + sx + sr) / 2;
+  return { pts: pts.map(([x, y]) => [(x - mid) * 2, y * 2] as [number, number]), lines, dots };
 }
 
 /** A direction on the sky from azimuth and elevation in degrees, `x`, `y` offsets in the plane facing it. */
@@ -107,7 +210,12 @@ export function createSky(uRune: { value: THREE.Color }) {
   const uTime = { value: 0 };
 
   const dome = new THREE.Mesh(new THREE.SphereGeometry(R, 48, 24), new THREE.ShaderMaterial({
-    uniforms: { uTime },
+    uniforms: {
+      uTime,
+      /* the band runs through these two points of the sky (upper left to lower right); its core is low on the right */
+      uBandN: { value: new THREE.Vector3().crossVectors(onSky(-40, 26), onSky(32, -3)).normalize() },
+      uCore: { value: onSky(16, 3) },
+    },
     vertexShader: 'varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
     fragmentShader: SKY_FRAG,
     side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
@@ -117,11 +225,14 @@ export function createSky(uRune: { value: THREE.Color }) {
 
   /* the constellations (drawn in the transparent pass, so they test depth and stay behind the stones): their stars as points, their letters as lines, each lit by how near the pointer is */
   const lit = CONSTELLATIONS.map(() => ({ value: 0 }));
+  /* the constellations stay hidden until the visitor begins, then fade in */
+  const uShow = { value: 0 };
+  let showTarget = 0;
   const centres = CONSTELLATIONS.map((k) => onSky(k.az, k.el));
   const starMat = new THREE.ShaderMaterial({
-    uniforms: { uRune, uLit: { value: lit.map((l) => l.value) } },
+    uniforms: { uRune, uShow, uLit: { value: lit.map((l) => l.value) } },
     vertexShader: /* glsl */ `
-      attribute float aK; uniform float uLit[6];
+      attribute float aK; uniform float uLit[4];
       varying float vLit;
       void main() {
         vLit = uLit[int(aK)];
@@ -129,19 +240,19 @@ export function createSky(uRune: { value: THREE.Color }) {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uRune; varying float vLit;
+      uniform vec3 uRune; uniform float uShow; varying float vLit;
       void main() {
         float d = length(gl_PointCoord - .5);
-        float a = smoothstep(.5, .05, d) * (.8 + vLit * .2);
+        float a = smoothstep(.5, .05, d) * (.8 + vLit * .2) * uShow;
         gl_FragColor = vec4(mix(vec3(.92, .95, 1.), uRune * 1.4 + .35, .35 + vLit * .65) * a, a);
       }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const lineMat = new THREE.ShaderMaterial({
-    uniforms: { uRune, uLit: starMat.uniforms.uLit },
-    vertexShader: 'attribute float aK; uniform float uLit[6]; varying float vLit; void main() { vLit = uLit[int(aK)]; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    uniforms: { uRune, uShow, uLit: starMat.uniforms.uLit },
+    vertexShader: 'attribute float aK; uniform float uLit[4]; varying float vLit; void main() { vLit = uLit[int(aK)]; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
     /* always faintly drawn, bright when lit */
-    fragmentShader: 'uniform vec3 uRune; varying float vLit; void main() { float a = .42 + vLit * .58; gl_FragColor = vec4(uRune * a, a); }',
+    fragmentShader: 'uniform vec3 uRune; uniform float uShow; varying float vLit; void main() { float a = (.42 + vLit * .58) * uShow; gl_FragColor = vec4(uRune * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const stars = new THREE.Points(new THREE.BufferGeometry(), starMat);
@@ -149,14 +260,41 @@ export function createSky(uRune: { value: THREE.Color }) {
   stars.renderOrder = lines.renderOrder = -9;
   group.add(stars, lines);
 
+  /* at the very top of the sky the camera can look up to, the crescent and star, in faint white starlight: there to be
+     found, not to stand out */
+  const FLAG = { az: -6.5, el: 15.5, size: 6 };
+  const flagLit = { value: 0 };
+  const flagCentre = onSky(FLAG.az, FLAG.el);
+  const flagPointMat = new THREE.ShaderMaterial({
+    uniforms: { uShow, uLit: flagLit },
+    vertexShader: 'uniform float uLit; void main() { gl_PointSize = 3. + uLit * 1.5; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    fragmentShader: 'uniform float uShow; uniform float uLit; void main() { float a = smoothstep(.5, .05, length(gl_PointCoord - .5)) * (.4 + uLit * .3) * uShow; gl_FragColor = vec4(vec3(1., .97, .95) * a, a); }',
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const flagLineMat = new THREE.ShaderMaterial({
+    uniforms: { uShow, uLit: flagLit },
+    vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    fragmentShader: 'uniform float uShow; uniform float uLit; void main() { float a = (.11 + uLit * .25) * uShow; gl_FragColor = vec4(vec3(1., .96, .94) * a, a); }',
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  {
+    const { pts, lines: fl, dots } = crescentAndStar(), scale = Math.tan(THREE.MathUtils.degToRad(FLAG.size));
+    const at = pts.map(([x, y]) => onSky(FLAG.az, FLAG.el, x * scale, y * scale).multiplyScalar(R * 0.98));
+    const pg = new THREE.BufferGeometry().setFromPoints(dots.map((i) => at[i]));
+    const lg = new THREE.BufferGeometry().setFromPoints(fl.flatMap(([i, j]) => [at[i], at[j]]));
+    const fp = new THREE.Points(pg, flagPointMat), fs = new THREE.LineSegments(lg, flagLineMat);
+    fp.renderOrder = fs.renderOrder = -9;
+    group.add(fp, fs);
+  }
+
   /** Lay the constellations out again; call once the rune font has loaded, since the shapes come from it. */
   const build = () => {
     const sp: number[] = [], sk: number[] = [], lp: number[] = [], lk: number[] = [];
     CONSTELLATIONS.forEach((k, ki) => {
-      const pts = runePoints(GLYPHS[k.glyph], 12), scale = Math.tan(THREE.MathUtils.degToRad(k.size));
+      const { pts, lines: strokes } = runeGraph(GLYPHS[k.glyph]), scale = Math.tan(THREE.MathUtils.degToRad(k.size));
       const at = pts.map(([x, y]) => onSky(k.az, k.el, x * scale, y * scale).multiplyScalar(R * 0.98));
       at.forEach((v) => { sp.push(v.x, v.y, v.z); sk.push(ki); });
-      for (const [i, j] of spanningLines(pts)) { lp.push(at[i].x, at[i].y, at[i].z, at[j].x, at[j].y, at[j].z); lk.push(ki, ki); }
+      for (const [i, j] of strokes) { lp.push(at[i].x, at[i].y, at[i].z, at[j].x, at[j].y, at[j].z); lk.push(ki, ki); }
     });
     stars.geometry.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
     stars.geometry.setAttribute('aK', new THREE.Float32BufferAttribute(sk, 1));
@@ -185,7 +323,12 @@ export function createSky(uRune: { value: THREE.Color }) {
   /** Keep the sky around the camera, turn it, light the constellations near `pointerDir` (null when no pointer). */
   const update = (dt: number, camera: THREE.Camera, pointerDir: THREE.Vector3 | null) => {
     uTime.value += dt;
+    uShow.value += (showTarget - uShow.value) * Math.min(1, dt * 0.6);
     group.position.copy(camera.position);
+    {
+      const near = pointerDir ? THREE.MathUtils.smoothstep(ray.copy(pointerDir).dot(flagCentre), Math.cos(0.14), Math.cos(0.06)) : 0;
+      flagLit.value += (near - flagLit.value) * Math.min(1, dt * (near > flagLit.value ? 3 : 0.8));
+    }
     centres.forEach((c, i) => {
       world.copy(c);
       const near = pointerDir ? THREE.MathUtils.smoothstep(ray.copy(pointerDir).dot(world), Math.cos(0.11), Math.cos(0.05)) : 0;
@@ -210,5 +353,5 @@ export function createSky(uRune: { value: THREE.Color }) {
     }
   };
 
-  return { group, update, rebuild: build };
+  return { group, update, rebuild: build, show: () => { showTarget = 1; } };
 }

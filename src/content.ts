@@ -1,13 +1,5 @@
 import { puzzlePiece, stoneText, type Shape } from "./scene/shapes";
-import {
-  cursorArrow,
-  envelope,
-  gitBranch,
-  mountains,
-  reactAtom,
-  stele,
-  tsBadge,
-} from "./scene/marks";
+import { cursorArrow, stele } from "./scene/marks";
 import { RUNE_FONT } from "./scene/textures";
 
 export type Lang = "tr" | "en";
@@ -30,7 +22,6 @@ export const SCENES: Scene[] = [
       en: "Text, and stone. Some of the earliest known Turkic texts were carved in stone. Mert Metin, frontend developer.",
     },
   },
-  /* ---- trial scenes: try-outs of the stone shapes, to pick from ---- */
   {
     /* "Türk" in Orkhon letters, which run right to left */
     shapes: [
@@ -53,16 +44,8 @@ export const SCENES: Scene[] = [
     shapes: [stele],
     title: { tr: "Projeler", en: "Projects" },
     body: {
-      tr: "Her proje bir dikilitaş. Yakında burada.",
-      en: "Every project a stele. Coming here soon.",
-    },
-  },
-  {
-    shapes: [reactAtom, tsBadge],
-    title: { tr: "Araçlar", en: "Tools" },
-    body: {
-      tr: "React ve TypeScript, her gün.",
-      en: "React and TypeScript, every day.",
+      tr: "Her iş bir dikilitaş: önce yazılır, sonra taşa kazınır.",
+      en: "Every piece of work a stele: written first, then carved in stone.",
     },
   },
   {
@@ -74,55 +57,11 @@ export const SCENES: Scene[] = [
     },
   },
   {
-    shapes: [
-      stoneText(">_", {
-        font: '"JetBrains Mono", monospace',
-        weight: 500,
-        outline: 0.05,
-        rows: 13,
-        runeColor: "#9dff7a",
-      }),
-    ],
-    title: { tr: "Araç yapımı", en: "Tooling" },
-    body: {
-      tr: "Masaüstü araçları ve komut satırı.",
-      en: "Desktop tools and the command line.",
-    },
-  },
-  {
-    shapes: [gitBranch],
-    title: { tr: "Açık kaynak", en: "Open source" },
-    body: {
-      tr: "Kodun bir kısmı GitHub’da.",
-      en: "Some of the code lives on GitHub.",
-    },
-  },
-  {
-    shapes: [mountains],
-    title: { tr: "Ötüken", en: "Ötüken" },
-    body: {
-      tr: "Göktürklerin kutsal dağı. Taşlar oradan geliyor.",
-      en: "The sacred mountain of the Göktürks. The stones come from there.",
-    },
-  },
-  {
-    shapes: [
-      envelope,
-      stoneText("MERHABA\nHELLO", { rows: 16, runeColor: "#ff6b5b" }),
-    ],
-    title: { tr: "Mektup", en: "Letter" },
-    body: {
-      tr: "İletişim için başka bir yol.",
-      en: "Another way to say contact.",
-    },
-  },
-  /* ---- end of trial scenes ---- */
-  {
     shapes: [stoneText("</>")],
     title: { tr: "Arayüzler", en: "Interfaces" },
     body: {
-      tr: "Hareket etmek için kurulmuş React ve TypeScript.",
-      en: "React and TypeScript, built to move.",
+      tr: "Nefes alan, akıp giden arayüzler.",
+      en: "Interfaces that move and breathe.",
     },
   },
   {
@@ -131,14 +70,6 @@ export const SCENES: Scene[] = [
     body: {
       tr: "Başka sayfaların içinde yaşayan yazılım.",
       en: "Software that lives inside other pages.",
-    },
-  },
-  {
-    shapes: [stoneText("MERHABA"), stoneText("HELLO")],
-    title: { tr: "İki dil", en: "Two languages" },
-    body: {
-      tr: "Türkçe ve İngilizce, tek ses.",
-      en: "Turkish and English, one voice.",
     },
   },
   {
@@ -155,13 +86,15 @@ export const UI: Record<string, Text> = {
     en: "Move to light the runes · hold to break · scroll to recarve",
   },
   about: {
-    tr: "Frontend ve tarayıcı eklentisi geliştiricisi. React, TypeScript, Chrome Manifest V3, Electron ve WebGL ile, Türkçe ve İngilizce arayüzler, tarayıcı eklentileri ve masaüstü araçları yaparım.",
-    en: "Frontend and browser-extension developer. I build interfaces, browser extensions and desktop tools in React, TypeScript, Chrome Manifest V3, Electron and WebGL, in Turkish and English.",
+    tr: "Frontend ve tarayıcı eklentisi geliştiricisi. Türkçe ve İngilizce arayüzler, tarayıcı eklentileri ve masaüstü araçları yaparım.",
+    en: "Frontend and browser-extension developer. I build interfaces, browser extensions and desktop tools, in Turkish and English.",
   },
   scenes: { tr: "Sahneler", en: "Scenes" },
   scene: { tr: "Sahne", en: "Scene" },
   language: { tr: "Dil", en: "Language" },
   sound: { tr: "Ses", en: "Sound" },
+  begin: { tr: "BAŞLA", en: "BEGIN" },
+  beginNote: { tr: "Sesli bir deneyim · taşa dokun", en: "An experience with sound · touch the stone" },
 };
 
 export const CONTACT = {

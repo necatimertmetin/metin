@@ -138,50 +138,6 @@ export function createEnvironment(renderer: THREE.WebGLRenderer) {
   return env;
 }
 
-/**
- * The face of a slab: R = the cut, G = a blurred halo, B = the cut's depth profile, like the rune atlas
- * but one picture across the whole face.
- * The texture stays square; `paint` draws on a canvas shaped like the face, which is stretched to fill it,
- * and the slab's own proportions stretch it back.
- */
-export function createInscription() {
-  const size = 2048;
-  const [cv, c] = canvas(size, size);
-  const [mask, m] = canvas(size, size);
-  const [tint, t] = canvas(size, size);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.anisotropy = 8;
-  const layer = (color: string) => {
-    t.globalCompositeOperation = 'source-over';
-    t.clearRect(0, 0, size, size);
-    t.drawImage(mask, 0, 0);
-    t.globalCompositeOperation = 'source-in';
-    t.fillStyle = color;
-    t.fillRect(0, 0, size, size);
-    return tint;
-  };
-  const paint = (draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void, aspect: number) => {
-    const h = size / aspect;
-    m.setTransform(1, 0, 0, 1, 0, 0);
-    m.clearRect(0, 0, size, size);
-    m.setTransform(1, 0, 0, aspect, 0, 0);
-    m.fillStyle = m.strokeStyle = '#fff';
-    draw(m, size, h);
-    c.globalCompositeOperation = 'source-over';
-    c.fillStyle = '#000';
-    c.fillRect(0, 0, size, size);
-    c.globalCompositeOperation = 'lighter';
-    c.drawImage(layer('#f00'), 0, 0);
-    c.filter = 'blur(5px)';
-    c.drawImage(layer('#00f'), 0, 0);
-    c.filter = 'blur(14px)';
-    c.drawImage(layer('#0f0'), 0, 0);
-    c.filter = 'none';
-    tex.needsUpdate = true;
-  };
-  return { texture: tex, paint };
-}
-
 /** The patch of ground the holes are drawn on, in world units: x from -HOLES_W/2, z from HOLES_Z0. */
 export const HOLES_W = 28;
 export const HOLES_D = 14;

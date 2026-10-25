@@ -13,15 +13,18 @@ export default function App() {
   const [shown, setShown] = useState(0);
   const [noGL, setNoGL] = useState(false);
   const [soundOn, setSoundOn] = useState(sound.enabled);
+  /* nothing but the opening stone shows until the visitor strikes it */
+  const [started, setStarted] = useState(false);
 
   const step = useCallback((dir: 1 | -1) => setIndex((i) => Math.min(SCENES.length - 1, Math.max(0, i + dir))), []);
 
   useEffect(() => {
     if (!canvas.current) return;
     try {
-      ruins.current = new RuinsScene(canvas.current, SCENES[0].shapes, { onStep: step });
+      ruins.current = new RuinsScene(canvas.current, SCENES[0].shapes, { onStep: step, onStart: () => setStarted(true) });
     } catch {
       setNoGL(true);
+      setStarted(true);
     }
     return () => { ruins.current?.dispose(); ruins.current = null; };
   }, [step]);
@@ -53,6 +56,18 @@ export default function App() {
         ))}
       </main>
 
+      {!noGL && (
+        <>
+          <button type="button" className={`gate${started ? ' gone' : ''}`} aria-label={`${UI.begin[lang]}: ${UI.beginNote[lang]}`}
+            tabIndex={started ? -1 : 0} onClick={() => ruins.current?.start()} />
+          <div className={`gate-hint${started ? ' gone' : ''}`} aria-hidden="true">
+            <b>{UI.begin[lang]}</b>
+            <span className="mono">{UI.beginNote[lang]}</span>
+          </div>
+        </>
+      )}
+
+      <div className={`shell${started ? ' on' : ''}`}>
       <header className="ui tl">
         <div className="mark">Mert Metin<small className="mono">{UI.role[lang]}</small></div>
       </header>
@@ -87,6 +102,7 @@ export default function App() {
           <a href={CONTACT.linkedin} target="_blank" rel="noopener" aria-label="LinkedIn"><LinkedInIcon /></a>
         </div>
       </footer>
+      </div>
     </>
   );
 }

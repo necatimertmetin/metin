@@ -26,8 +26,7 @@ vec3 stoneP(vec3 p, vec3 fn, out vec3 dir){
   float lump = fbm3(w * 1.6 + aMisc.y * 31.) - .5;
   float chip = smoothstep(.56, .82, n3(w * 5.5 + aMisc.y * 11.));
   float bite = smoothstep(.62, .9, n3(w * 2.4 + aMisc.y * 7.));
-  /* a slab (glyph 64) is far bigger than the cube's vertex grid, so its lumps stay low or they turn into broad smudges */
-  float amt = m * (lump * .16 - chip * .06 - bite * .12) * mix(1., .3, step(63.5, aMisc.x));
+  float amt = m * (lump * .16 - chip * .06 - bite * .12);
   return pr + dir * amt / sz;
 }
 vec3 stoneP(vec3 p, vec3 fn){ vec3 dir; return stoneP(p, fn, dir); }
@@ -57,8 +56,7 @@ vec3 w = vLocal * vSize * 3. + vMisc.y * 19.;
 float nA = fbm3(w * 1.4);
 float crack = (1. - smoothstep(.0, .05, abs(n3(w * 1.9) - .5))) * smoothstep(.45, .7, n3(w * .7 + 3.));
 crack = max(crack, (1. - smoothstep(.0, .04, abs(n3(w * 3.2 + 9.) - .5))) * smoothstep(.55, .8, n3(w * 1.3 + 5.)) * .7);
-/* a slab (glyph 64) is one big face, so keep its cracks sparse or they crowd the inscription */
-crack *= (1. - step(63.5, vMisc.x) * .8) * (1. - vHome.z);
+crack *= 1. - vHome.z;
 float pits = smoothstep(.6, .85, fbm3(w * 3.5));
 vec3 stoneC = mix(vec3(.085, .077, .066), vec3(.145, .13, .112), smoothstep(.2, .8, fbm3(w * .4)));
 stoneC *= (.84 + .32 * nA) * (1. - .3 * pits) * (1. - .6 * crack);
@@ -67,15 +65,12 @@ float fine = 1. - smoothstep(.25, .7, length(fwidth(w)) * 14.);
 stoneC *= 1. + (n3(w * 22.) - .5) * .35 * fine + (n3(w * 61.) - .5) * .2 * fine;
 /* weathering: darker streaks where rain ran down the stone */
 stoneC *= 1. - .14 * smoothstep(.55, .85, n3(vec3(w.x * 2.5, w.y * .3, w.z * 2.5) + 11.)) * smoothstep(.4, .7, n3(w * .8 + 4.));
-/* glyph 64 marks a slab: its whole front face carries the inscription texture (same R = cut, G = halo, B = depth) instead of one rune */
-float slab = step(63.5, vMisc.x);
 float side = min(vSize.x, vSize.y) * .76;
 vec2 guv = vLocal.xy * vSize.xy / side + .5;
-float inG = step(0., guv.x) * step(guv.x, 1.) * step(0., guv.y) * step(guv.y, 1.) * step(.47, vLocal.z) * (1. - slab);
+float inG = step(0., guv.x) * step(guv.x, 1.) * step(0., guv.y) * step(guv.y, 1.) * step(.47, vLocal.z);
 vec2 cellXY = vec2(mod(vMisc.x, 8.), floor(vMisc.x / 8.));
 /* vHome.z: how much the stone still lies in the ground, where it shows no rune */
-vec4 rt = (1. - vHome.z) * (texture2D(uRunes, vec2((cellXY.x + guv.x) / 8., (7. - cellXY.y + guv.y) / 8.)) * inG
-        + texture2D(uInscription, vLocal.xy + .5) * step(.47, vLocal.z) * slab);
+vec4 rt = (1. - vHome.z) * texture2D(uRunes, vec2((cellXY.x + guv.x) / 8., (7. - cellXY.y + guv.y) / 8.)) * inG;
 float rune = rt.r;
 /* the cut: sloped walls from the B profile, a floor in shade; the light comes from its bottom (see the emissive part) */
 float carve = rt.b;
@@ -87,7 +82,7 @@ if (vHome.z > 0.) { float bc, bm, bf; diffuseColor.rgb = mix(diffuseColor.rgb, g
 
 /** Fine relief from cracks, pits and the rune, applied with screen-space derivatives. */
 export const STONE_RELIEF = /* glsl */ `
-float sBh = -crack * .8 - pits * .3 + (fbm3(w * 3.) - .5) * .4 - carve * mix(1.1, 3.2, slab)
+float sBh = -crack * .8 - pits * .3 + (fbm3(w * 3.) - .5) * .4 - carve * 1.1
           + ((fbm3(w * 9.) - .5) * .5 + (n3(w * 28.) - .5) * .25) * fine;
 vec3 sVp = -vViewPosition; vec3 sDpx = dFdx(sVp); vec3 sDpy = dFdy(sVp);
 float sDhx = dFdx(sBh); float sDhy = dFdy(sBh);
@@ -106,19 +101,18 @@ export const STONE_EMISSIVE = /* glsl */ `
 vec3 wn = normalize((vec4(normal, 0.) * viewMatrix).xyz);
 float moss = smoothstep(.15, .75, wn.y) * smoothstep(.42, .66, fbm3(w * 1.8 + 5.));
 moss = max(moss, crack * smoothstep(.4, .7, fbm3(w * 2.6)) * .9);
-moss = clamp(moss * (1. - max(inG, slab * step(.02, rt.g)) * .7), 0., 1.) * (1. - vHome.z);
+moss = clamp(moss * (1. - inG * .7), 0., 1.) * (1. - vHome.z);
 vec3 mossC = mix(vec3(.06, .10, .025), vec3(.16, .24, .06), fbm3(w * 5.));
 diffuseColor.rgb = mix(diffuseColor.rgb, mossC, moss);
 roughnessFactor = mix(roughnessFactor, .72, moss);
 float dm = length(vWPos.xy - uMouse.xy);
 float near = exp(-dm * dm * 1.3) * uHas;
 float sx = ((1. - uSweep) * 1.5 - .25) * 2. * uView.x - uView.x;
-/* the sweep passes stone by stone, and across a slab's face point by point */
-float sweep = step(.001, uSweep) * exp(-pow((mix(vHome.x, vWPos.x, slab) - sx) / uView.x * 4.5, 2.));
+float sweep = step(.001, uSweep) * exp(-pow((vHome.x - sx) / uView.x * 4.5, 2.));
 float idle = smoothstep(.93, 1., sin(uTime * .7 + vMisc.y * 40.)) * .7;
-float glow = clamp(near * 1.9 + sweep * 1.4 + idle, 0., 1.9) * (.85 + .15 * sin(uTime * 9. + vMisc.y * 20.));
+float glow = clamp(near * 1.9 + sweep * 1.4 + idle + uGate * 2.6, 0., 3.) * (.85 + .15 * sin(uTime * 9. + vMisc.y * 20.));
 /* runes smoulder from the bottom of the cut; the pointer, the sweep and the idle flicker light them up fully */
-totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - moss * .6)) * glow + core * mix(.65, 1.6, step(64.5, vMisc.x)) + rt.g * mix(.03, .1, step(64.5, vMisc.x)) + crack * .03);
+totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - moss * .6)) * glow + core * .65 + rt.g * .03 + crack * .03);
 `;
 
 /**
@@ -127,14 +121,14 @@ totalEmissiveRadiance += uRune * ((core * 3.6 + rt.g * .5 + crack * .9 * (1. - m
  * Needs `uRunes` declared before it.
  */
 export const GROUND_FN = /* glsl */ `
-/* a rune cut into the rock on a loose grid, about one cell in four, at a random quarter turn (R = cut, G = halo, B = depth) */
+/* small runes cut into the rock on a loose grid, in about two cells in five, at a random quarter turn (R = cut, G = halo, B = depth) */
 vec4 groundRune(vec3 p) {
-  vec2 q = p.xz / 1.4, cell = floor(q);
-  float has = step(h3(vec3(cell, 7.)), .27);
+  vec2 q = p.xz / .9, cell = floor(q);
+  float has = step(h3(vec3(cell, 7.)), .4);
   vec2 f = fract(q) - .5;
   float k = floor(h3(vec3(cell, 13.)) * 4.);
   f = k < 1. ? f : k < 2. ? vec2(-f.y, f.x) : k < 3. ? -f : vec2(f.y, -f.x);
-  vec2 guv = vec2(f.x, -f.y) / .6 + .5;
+  vec2 guv = vec2(f.x, -f.y) / .5 + .5;
   float inside = step(0., guv.x) * step(guv.x, 1.) * step(0., guv.y) * step(guv.y, 1.);
   float g = floor(h3(vec3(cell, 29.)) * 64.);
   vec2 c = vec2(mod(g, 8.), floor(g / 8.));
@@ -199,4 +193,12 @@ if (dot(gN, normalize(vViewPosition)) > .05) normal = gN;
 /** The ground's runes glow faintly from the bottom of their cuts, like the stones'. */
 export const GROUND_EMISSIVE = /* glsl */ `
 totalEmissiveRadiance += uRune * grt.r * smoothstep(.3, .75, grt.b) * .45 * smoothstep(20., 3., length(vGPos.xz - vec2(0., -2.)));
+/* the opening strike's shock wave: a ring of rune light running out from the impact, lighting runes and cracks as it
+   passes, and a short flash of them inside it */
+if (uWave.z >= 0.) {
+  float wd = length(vGPos.xz - uWave.xy), wr = uWave.z * 7.;
+  float ring = exp(-pow((wd - wr) / (.35 + uWave.z * .45), 2.)) * exp(-uWave.z * .7);
+  float inside = smoothstep(wr, wr - 3., wd) * exp(-uWave.z * 1.1);
+  totalEmissiveRadiance += uRune * uWave.w * (ring * (.35 + grt.r * 4. + gcrack * 2.5) + inside * (grt.r * 1.6 + gcrack * 1.2));
+}
 `;
