@@ -229,8 +229,9 @@ function wordPoints(word: string) {
 }
 
 /**
- * Sample a logo's outline into points (about unit height, centred): the edge of its opaque shape, one point per
- * small cell so the outline reads as an even line of stars. Loaded once per logo.
+ * Sample a logo's outline into points (about unit height, centred): the edge of its opaque shape and any sharp change
+ * of brightness inside it (a face on a screen, eyes), one point per small cell so the outline reads as an even line of
+ * stars. Loaded once per logo.
  */
 const logoCache = new Map<string, Promise<[number, number][]>>();
 function logoPoints(url: string) {
@@ -245,9 +246,15 @@ function logoPoints(url: string) {
         const c = cv.getContext('2d', { willReadFrequently: true })!;
         c.drawImage(img, 0, 0, W, H);
         const a = c.getImageData(0, 0, W, H).data, on = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && a[(y * W + x) * 4 + 3] > 128;
+        const lum = (x: number, y: number) => { const i = (y * W + x) * 4; return (a[i] * 0.3 + a[i + 1] * 0.59 + a[i + 2] * 0.11) / 255; };
+        const edge = (x: number, y: number) => {
+          if (!(on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1))) return true;
+          const l = lum(x, y);
+          return Math.abs(l - lum(x + 1, y)) > 0.3 || Math.abs(l - lum(x, y + 1)) > 0.3;
+        };
         const cell = 4, taken = new Set<number>(), pts: [number, number][] = [];
         for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-          if (!on(x, y) || (on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1))) continue;
+          if (!on(x, y) || !edge(x, y)) continue;
           const k = Math.floor(x / cell) + Math.floor(y / cell) * 1000;
           if (taken.has(k)) continue;
           taken.add(k);
