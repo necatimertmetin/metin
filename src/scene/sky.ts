@@ -4,6 +4,7 @@ import { createRuneLogo } from './runeLogo';
 import { NEIGHBOURS, thin } from './skeleton';
 import { NOISE3 } from './glsl';
 import { GLYPHS, RUNE_FONT } from './textures';
+import { createStory, type Story } from './tengri';
 
 /*
  * The night sky: a dark dome that meets the fog at the horizon, faint stars in two layers, a whisper of the Milky Way,
@@ -349,12 +350,12 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
   let showTarget = 0;
   const centres = ALL.map((k) => onSky(k.az, k.el));
   const starMat = new THREE.ShaderMaterial({
-    uniforms: { uRune, uShow, uDim, uFocus: { value: -1 }, uLit: { value: lit.map((l) => l.value) } },
+    uniforms: { uRune, uShow, uDim, uFocus: { value: -1 }, uLit: { value: lit.map((l) => l.value) }, uTengri: { value: 0 } },
     vertexShader: /* glsl */ `
-      attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; uniform float uVanish;
+      attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; uniform float uVanish; uniform float uTengri;
       varying float vLit; varying float vMelt;
       void main() {
-        float mine = abs(aK - uFocus) < .5 ? 1. : 0.;
+        float mine = abs(aK - uFocus) < .5 || (aK < 3.5 && uTengri > .5) ? 1. : 0.;
         vLit = uLit[int(aK)] * (mine > .5 ? 1. : 1. - uDim);
         vMelt = mine * uVanish;
         gl_PointSize = 5. + vLit * 3.;
@@ -370,9 +371,9 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const lineMat = new THREE.ShaderMaterial({
-    uniforms: { uRune, uShow, uDim, uFocus: starMat.uniforms.uFocus, uLit: starMat.uniforms.uLit },
-    vertexShader: `attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; varying float vLit; varying float vMine;
-      void main() { vMine = abs(aK - uFocus) < .5 ? 1. : 0.; vLit = uLit[int(aK)] * (vMine > .5 ? 1. : 1. - uDim); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    uniforms: { uRune, uShow, uDim, uFocus: starMat.uniforms.uFocus, uLit: starMat.uniforms.uLit, uTengri: starMat.uniforms.uTengri },
+    vertexShader: `attribute float aK; uniform float uLit[${N}]; uniform float uFocus; uniform float uDim; uniform float uTengri; varying float vLit; varying float vMine;
+      void main() { vMine = abs(aK - uFocus) < .5 || (aK < 3.5 && uTengri > .5) ? 1. : 0.; vLit = uLit[int(aK)] * (vMine > .5 ? 1. : 1. - uDim); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
     /* always faintly drawn, bright when lit; while one is open the others fade */
     fragmentShader: 'uniform vec3 uRune; uniform float uShow; uniform float uDim; uniform float uVanish; varying float vLit; varying float vMine; void main() { float a = (.42 + vLit * .58) * uShow * mix(1. - uDim * .7, 1. - uVanish, vMine); gl_FragColor = vec4(uRune * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
@@ -386,17 +387,18 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
      found, not to stand out */
   const FLAG = { az: -6.5, el: 15.5, size: 6 };
   const flagLit = { value: 0 };
+  const flagHide = { value: 0 };
   const flagCentre = onSky(FLAG.az, FLAG.el);
   const flagPointMat = new THREE.ShaderMaterial({
-    uniforms: { uShow, uLit: flagLit },
+    uniforms: { uShow, uLit: flagLit, uHide: flagHide },
     vertexShader: 'uniform float uLit; void main() { gl_PointSize = 3. + uLit * 1.5; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
-    fragmentShader: 'uniform float uShow; uniform float uLit; void main() { float a = smoothstep(.5, .05, length(gl_PointCoord - .5)) * (.4 + uLit * .3) * uShow; gl_FragColor = vec4(vec3(1., .97, .95) * a, a); }',
+    fragmentShader: 'uniform float uShow; uniform float uLit; uniform float uHide; void main() { float a = smoothstep(.5, .05, length(gl_PointCoord - .5)) * (.4 + uLit * .3) * uShow * (1. - uHide); gl_FragColor = vec4(vec3(1., .97, .95) * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const flagLineMat = new THREE.ShaderMaterial({
-    uniforms: { uShow, uLit: flagLit },
+    uniforms: { uShow, uLit: flagLit, uHide: flagHide },
     vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
-    fragmentShader: 'uniform float uShow; uniform float uLit; void main() { float a = (.11 + uLit * .25) * uShow; gl_FragColor = vec4(vec3(1., .96, .94) * a, a); }',
+    fragmentShader: 'uniform float uShow; uniform float uLit; uniform float uHide; void main() { float a = (.11 + uLit * .25) * uShow * (1. - uHide); gl_FragColor = vec4(vec3(1., .96, .94) * a, a); }',
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   {
@@ -408,6 +410,14 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     fp.renderOrder = fs.renderOrder = -9;
     group.add(fp, fs);
   }
+
+  /* Teŋri: the word under the pointer (its four letters light together), and opened, with its story written beneath */
+  let tengriHover = false, tengriOpen = false;
+  const STORY = { az: -6.5, el: 12.6, width: 31 };
+  const story = createStory(2 * R * 0.96 * Math.tan(THREE.MathUtils.degToRad(STORY.width / 2)));
+  story.mesh.position.copy(onSky(STORY.az, STORY.el)).multiplyScalar(R * 0.96);
+  story.mesh.lookAt(0, 0, 0);
+  group.add(story.mesh);
 
   /** Lay the constellations out again; call once the rune font has loaded, since the shapes come from it. */
   const build = () => {
@@ -532,11 +542,14 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     centres.forEach((c, i) => {
       world.copy(c);
       const near = pointerDir ? THREE.MathUtils.smoothstep(ray.copy(pointerDir).dot(world), Math.cos(0.11), Math.cos(0.05)) : 0;
-      const want = i === focused ? 1 : near;
+      const want = i === focused || (i < 4 && (tengriOpen || tengriHover)) ? 1 : near;
       lit[i].value += (want - lit[i].value) * Math.min(1, dt * (want > lit[i].value ? 3 : 0.8));
       starMat.uniforms.uLit.value[i] = lit[i].value;
     });
-    uDim.value += ((focused >= 0 ? 1 : 0) - uDim.value) * Math.min(1, dt * 2);
+    uDim.value += ((focused >= 0 || tengriOpen ? 1 : 0) - uDim.value) * Math.min(1, dt * 2);
+    starMat.uniforms.uTengri.value = tengriOpen ? 1 : 0;
+    flagHide.value += ((tengriOpen ? 1 : 0) - flagHide.value) * Math.min(1, dt * 2);
+    story.update(dt);
     /* an open nebula takes about two seconds to swell and give up its logo, and closes quicker */
     uVanish.value = 0;
     /* the one in play: the open project, or else the one under the pointer; its stars melt into its cloud */
@@ -604,6 +617,20 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     return best;
   };
 
+  /** Whether the pointer is on Teŋri's word (any of its four letters). */
+  const pickTengri = (pointerDir: THREE.Vector3 | null) => {
+    if (!pointerDir || uShow.value < 0.5) return false;
+    return centres.slice(0, 4).some((c) => pointerDir.dot(c) > Math.cos(tengriHover ? 0.075 : 0.06));
+  };
+  /** Teŋri under the pointer: its letters light together. */
+  const hoverTengri = (on: boolean) => { tengriHover = on; };
+  /** Open Teŋri (its story is written under it, the rest of the sky steps back), or close it. */
+  const openTengri = (on: boolean) => { tengriOpen = on; story.open(on); };
+  /** Where to look to see Teŋri and its story under it. */
+  const gazeTengri = () => onSky(-6.5, 16.8);
+  /** Teŋri's story, in the language chosen. */
+  const tellTengri = (s: Story) => story.set(s);
+
   /** The project under the pointer, or -1: its cloud opens and its logo forms, as a foretaste of opening it. */
   const hover = (project: number) => {
     hovered = project < 0 ? -1 : ALL.findIndex((k) => k.project === project);
@@ -641,5 +668,5 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
     return k ? onSky(k.az + 8, k.el - k.size * 0.55) : null;
   };
 
-  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, hover, focus, gazeAt, opened, poke, leaving };
+  return { group, update, rebuild: build, show: () => { showTarget = 1; }, pick, hover, focus, gazeAt, opened, poke, leaving, pickTengri, hoverTengri, openTengri, gazeTengri, tellTengri };
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RuinsScene } from './scene/RuinsScene';
-import { CONTACT, PROJECTS, SCENES, UI, initialLang, type Lang } from './content';
+import { CONTACT, PROJECTS, SCENES, TENGRI, UI, initialLang, type Lang } from './content';
 import { startAnalytics, track } from './analytics';
 import { GitHubIcon, LinkedInIcon, SoundIcon } from './ui/icons';
 import { sound } from './scene/sound';
@@ -48,6 +48,9 @@ export default function App() {
 
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
 
+  /* Teŋri's story in the sky follows the language */
+  useEffect(() => { ruins.current?.tellTengri(TENGRI[lang]); }, [lang]);
+
   /* the sky turns to the open project; Escape closes it */
   useEffect(() => {
     ruins.current?.setProject(project);
@@ -88,6 +91,12 @@ export default function App() {
             <p>{s.body[lang]}</p>
           </section>
         ))}
+        <section>
+          <h2>Teŋri</h2>
+          <blockquote>{TENGRI[lang].quote}</blockquote>
+          <p>{TENGRI[lang].translation} ({TENGRI[lang].source})</p>
+          <p>{TENGRI[lang].body}</p>
+        </section>
         <section>
           <h2>{UI.projects[lang]}</h2>
           {PROJECTS.map((p) => (

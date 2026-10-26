@@ -251,6 +251,25 @@ export const SCENES: Scene[] = [
   },
 ];
 
+/**
+ * Teŋri, the sky god, whose name the four constellations at the top of the sky write: what opens under it when it is
+ * touched. The quote is the opening of the Kül Tigin inscription (east face), in a common Turkish reading.
+ */
+export const TENGRI: Record<Lang, { quote: string; translation: string; source: string; body: string }> = {
+  tr: {
+    quote: "Üze kök tengri asra yağız yer kılındukda, ikin ara kişi oğlı kılınmış",
+    translation: "Üstte mavi gök, altta yağız yer yaratıldığında, ikisinin arasında insanoğlu yaratılmış.",
+    source: "KÜL TİGİN YAZITI · 732",
+    body: "Eski Türkler için Tengri gökyüzünün kendisiydi: sonsuz, her şeyi gören, dünyaya düzen veren. Kağana yönetme hakkını, kutu, o verirdi. Yukarıdaki yıldızlar onun adını yazıyor.",
+  },
+  en: {
+    quote: "Üze kök tengri asra yağız yer kılındukda, ikin ara kişi oğlı kılınmış",
+    translation: "When the blue sky above and the dark earth below were made, between the two the sons of men were made.",
+    source: "KÜL TIGIN INSCRIPTION · 732",
+    body: "For the early Turks, Tengri was the sky itself: endless, all-seeing, the order of the world. It gave the khagan his right to rule, his kut. The stars above write its name.",
+  },
+};
+
 export const UI: Record<string, Text> = {
   role: { tr: "Frontend geliştirici", en: "Frontend developer" },
   hint: {
