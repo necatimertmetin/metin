@@ -14,8 +14,10 @@ import {
 import { createGroundGeometry } from "./ground";
 import { createEnclosure, type Site } from "./gobekli";
 import { createDerinkuyu, DERIN } from "./derinkuyu";
+import { LOOKS, RIDGE, regionOf, type Region } from "./regions";
 import { createRealm, type Card } from "./realm";
 import { createSky, type SkyProject } from "./sky";
+import type { Story } from "./tengri";
 import {
   GLYPHS,
   HOLES_D,
@@ -154,6 +156,10 @@ export class RuinsScene {
   private hoverProject = -1;
   private pressProject = -1;
   private openProject = -1;
+  /* Teŋri's word in the sky: under the pointer, pressed on, open (its story written under it) */
+  private tengriHover = false;
+  private pressTengri = false;
+  private tengriOpen = false;
   /** where the camera turns to see the open project, and where it is looking now (easing between) */
   private focusDir: THREE.Vector3 | null = null;
   private baseFov = 30;
@@ -186,6 +192,35 @@ export class RuinsScene {
   private derinView = 0;
   private readonly torch = new THREE.Vector3();
   private readonly tmpKick = new THREE.Vector3();
+  /*
+   * The places: the one the view is in, and the flight to another (0 to 1, -1 when not flying), like a drone: leaving
+   * a place with monuments it first comes down to them and sweeps half round them, close, then turns away and climbs
+   * a little, the ground running by under it as one place turns into the next, and comes down in the other.
+   * `flightH` is how high it cruises; `from` the place it left; `orbit` whether it goes round monuments first.
+   */
+  private region: Region = "home";
+  private from: Region = "home";
+  private flightT = -1;
+  private flightDur = 2.6;
+  private flightH = 6;
+  private flightV = 26;
+  private orbit = false;
+  private readonly basePos = new THREE.Vector3();
+  private readonly baseLook = new THREE.Vector3();
+  private readonly dronePos = new THREE.Vector3();
+  private readonly droneDir = new THREE.Vector3();
+  private travel0 = 0;
+  private swapped = false;
+  private readonly look2 = new THREE.Vector3();
+  private readonly fogA = new THREE.Color();
+  private readonly regionU = {
+    uTint: { value: new THREE.Vector3(1, 1, 1) },
+    uHome: { value: 1 },
+    uGrass: { value: 0 },
+    uHoleOn: { value: 1 },
+    uTravel: { value: new THREE.Vector2() },
+    uRidge: { value: new THREE.Vector2() },
+  };
   private readonly tmpLook = new THREE.Vector3();
   private readonly level = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private monumentTimer = 0;
@@ -267,11 +302,18 @@ export class RuinsScene {
       sh.uniforms.uRune = this.uni.uRune;
       sh.uniforms.uWave = this.wave;
       sh.uniforms.uShaft = this.shaft;
+      Object.assign(sh.uniforms, this.regionU);
       sh.uniforms.uHolesRect = {
         value: new THREE.Vector4(HOLES_W / 2, HOLES_Z0, HOLES_W, HOLES_D),
       };
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vGPos;")
+        .replace("#include <common>", `#include <common>\nvarying vec3 vGPos;\n${NOISE3}\n${RIDGE}`)
+        /* the far land of the place, raised out of the ground, and its slopes lit as slopes */
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\ntransformed.y += ridgeAt(position.xz);")
+        .replace(
+          "#include <beginnormal_vertex>",
+          "#include <beginnormal_vertex>\nif (uRidge.x > 0.) { float r0 = ridgeAt(position.xz); float rx = ridgeAt(position.xz + vec2(.35, 0.)) - r0, rz = ridgeAt(position.xz + vec2(0., .35)) - r0; objectNormal = normalize(objectNormal + vec3(-rx, 0., -rz) / .35); }",
+        )
         .replace(
           "#include <project_vertex>",
           "#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;",
@@ -279,7 +321,7 @@ export class RuinsScene {
       sh.fragmentShader = sh.fragmentShader
         .replace(
           "#include <common>",
-          `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave; uniform vec4 uShaft;\n${GROUND_FN}`,
+          `#include <common>\n${NOISE3}\nvarying vec3 vGPos; uniform sampler2D uHoles; uniform vec4 uHolesRect; uniform sampler2D uRunes; uniform vec3 uRune; uniform vec4 uWave; uniform vec4 uShaft; uniform vec3 uTint; uniform float uHome; uniform float uGrass; uniform float uHoleOn; uniform vec2 uTravel;\n${GROUND_FN}`,
         )
         /* Derinkuyu: the air shaft's mouth */
         .replace(
@@ -600,17 +642,150 @@ vNormalMapUv = leafUv;
 
   /** Float the stones into a shape; several shapes take turns every few seconds. */
   show(shapes: Shape[], lookUp = false, site?: Site | "derinkuyu") {
+    this.setTengri(false);
     this.lookUp = lookUp;
     this.site = site;
-    if (this.started) this.raise(site);
     this.sequence = shapes;
     this.seqIndex = 0;
     this.seqTimer = 0;
     this.held = false;
     this.physics?.release();
+    this.swept = false;
+    /* a scene in another place: the stones and the monuments here go, the view flies there, and they come once it lands */
+    if (this.started && (regionOf(site) !== this.region || this.flightT >= 0)) {
+      this.runeTarget.set(shapes[0].runeColor ?? RUNE_COLOR);
+      /* the monuments stay standing: the view leaves them behind */
+      this.field.assign([], false);
+      if (this.flightT < 0) this.fly(this.region === "home" ? 3.2 : 6.5, 3.4, 30);
+      return;
+    }
+    if (this.started) this.raise(site);
     this.assign(shapes[0]);
     sound.whoosh(1.8);
-    this.swept = false;
+  }
+
+  /** Fly to the place the scene is in, over `dur` seconds, rising `height`, at up to `speed` units a second. */
+  private fly(dur: number, height: number, speed: number) {
+    this.flightT = 0;
+    this.flightDur = this.reduced ? 0.8 : dur;
+    this.flightH = this.reduced ? 0 : height;
+    this.flightV = this.reduced ? 0 : speed;
+    this.swapped = false;
+    this.from = this.region;
+    this.orbit = !this.reduced && this.region !== "home";
+    this.travel0 = this.regionU.uTravel.value.y;
+    /* the holes and pits stay where they are; the ground running by would leave them behind, so they go */
+    this.regionU.uHoleOn.value = 0;
+    this.pitMesh.visible = false;
+    sound.whoosh(dur * 0.9, 0.9);
+  }
+
+  /* the flight's course: halfway, behind the cloud, the place changes; landed, its stones and monuments come */
+  private flight(dt: number) {
+    if (this.flightT < 0) return;
+    this.flightT = Math.min(1, this.flightT + dt / this.flightDur);
+    const p = this.flightT, to = regionOf(this.site), cs = this.cruiseFrom(), span = 1 - cs;
+    /* once it has turned away, the ground runs on beneath, at full speed while it cruises */
+    const sp = THREE.MathUtils.smoothstep(p, cs, cs + 0.12) * (1 - THREE.MathUtils.smoothstep(p, 0.8, 0.96));
+    this.regionU.uTravel.value.y -= this.flightV * sp * dt;
+    /* and on the way the one place becomes the other */
+    this.blendRegion(this.from, to, THREE.MathUtils.smoothstep(p, cs + span * 0.25, cs + span * 0.7));
+    /* what stood here is carried off with the ground, behind the view */
+    if (!this.swapped) this.monuments.forEach((m) => m.slide(this.travel0 - this.regionU.uTravel.value.y));
+    if (!this.swapped && p >= cs + span * 0.45) {
+      this.swapped = true;
+      this.monuments.forEach((m) => m.hide());
+      this.region = to;
+    }
+    if (p < 1) return;
+    this.flightT = -1;
+    this.setRegion(this.region);
+    /* the visitor may have scrolled on meanwhile, to yet another place */
+    if (regionOf(this.site) !== this.region) { this.fly(2.4, 3.4, 26); return; }
+    this.assign(this.sequence[this.seqIndex]);
+    this.raise(this.site);
+  }
+
+  /* when the flight stops going round the monuments and sets off */
+  private cruiseFrom() {
+    return this.orbit ? 0.42 : 0;
+  }
+
+  /*
+   * The drone's view at `p` of the flight, from the view it would have standing (`basePos` looking at `baseLook`):
+   * round the monuments first, if any, looking at them; then turning away to cruise, a little up, looking ahead and
+   * down; then down into the standing view.
+   */
+  private drone(p: number) {
+    const U = this.hh / 3.08, g = -this.hh * 0.96, S = THREE.MathUtils.smoothstep;
+    const C = this.tmpLook.set(0, g + 1.5 * U, -1.6 * U);
+    const cs = this.cruiseFrom();
+    const cruise = this.look2.copy(this.basePos).add(this.tmpKick.set(0, this.flightH * U, 0));
+    /* round the monuments: from where it stands, closing in to just outside them, low, half way round */
+    const round = (o: number, out: THREE.Vector3) => {
+      const th0 = Math.atan2(this.basePos.x - C.x, this.basePos.z - C.z), d0 = Math.hypot(this.basePos.x - C.x, this.basePos.z - C.z);
+      const e = o * o * (3 - 2 * o), close = S(o, 0, 0.45);
+      const r = THREE.MathUtils.lerp(d0, 6.4 * U, close), th = th0 + e * 3.3;
+      const y = THREE.MathUtils.lerp(this.basePos.y, g + 1.6 * U, close) + Math.sin(o * Math.PI) * 0.6 * U;
+      return out.set(C.x + Math.sin(th) * r, y, C.z + Math.cos(th) * r);
+    };
+    const pos = this.dronePos;
+    let yawA: number, pitchA: number;
+    const dirTo = (from: THREE.Vector3, to: THREE.Vector3) => {
+      const d = this.droneDir.subVectors(to, from).normalize();
+      return [Math.atan2(d.x, -d.z), Math.asin(THREE.MathUtils.clamp(d.y, -1, 1))] as const;
+    };
+    /* cruising it looks ahead, a little down: the land running at it and the horizon, not the ground under it */
+    const fwd = dirTo(new THREE.Vector3(), new THREE.Vector3(0, -1.1, -7));
+    let yaw: number, pitch: number;
+    if (this.orbit && p < cs) {
+      round(p / cs, pos);
+      [yaw, pitch] = dirTo(pos, C);
+    } else {
+      const start = this.orbit ? round(1, new THREE.Vector3()) : this.basePos.clone();
+      const q = S(p, cs, cs + 0.22);
+      pos.lerpVectors(start, cruise, q);
+      [yawA, pitchA] = this.orbit ? dirTo(start, C) : dirTo(this.basePos, this.baseLook);
+      /* turn the short way round to look ahead */
+      let dy = fwd[0] - yawA;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      const t = S(p, cs, cs + (this.orbit ? 0.14 : 0.2));
+      yaw = yawA + dy * t;
+      pitch = THREE.MathUtils.lerp(pitchA, fwd[1], t);
+    }
+    /* and down into the standing view at the end */
+    const l = S(p, 0.8, 1);
+    const [yawB, pitchB] = dirTo(this.basePos, this.baseLook);
+    let dl = yawB - yaw;
+    dl = Math.atan2(Math.sin(dl), Math.cos(dl));
+    yaw += dl * l;
+    pitch = THREE.MathUtils.lerp(pitch, pitchB, l);
+    pos.lerp(this.basePos, l);
+    this.camera.position.copy(pos);
+    this.camera.lookAt(this.tmpLook.set(pos.x + Math.sin(yaw) * Math.cos(pitch), pos.y + Math.sin(pitch), pos.z - Math.cos(yaw) * Math.cos(pitch)));
+    /* a little bank as it sweeps and turns */
+    this.camera.rotateZ(Math.sin(p * Math.PI * 2) * 0.05 * (1 - l));
+  }
+
+  /** Become another place: the ground's colour, the grass, the haze, the land rising far off. */
+  private setRegion(r: Region) {
+    this.region = r;
+    this.blendRegion(r, r, 1);
+    /* the holes stones left are at home */
+    this.pitMesh.visible = r === "home";
+    this.regionU.uHoleOn.value = r === "home" ? 1 : 0;
+  }
+
+  /* the ground's colour, grass, runes and the haze, part way from one place's to another's */
+  private blendRegion(a: Region, b: Region, t: number) {
+    const A = LOOKS[a], B = LOOKS[b], l = THREE.MathUtils.lerp;
+    this.regionU.uTint.value.set(l(A.tint[0], B.tint[0], t), l(A.tint[1], B.tint[1], t), l(A.tint[2], B.tint[2], t));
+    this.regionU.uHome.value = l(A.home, B.home, t);
+    this.regionU.uGrass.value = l(A.grass, B.grass, t);
+    this.regionU.uRidge.value.set(l(A.ridge, B.ridge, t), l(A.peaks, B.peaks, t));
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.copy(this.fogA.set(A.fog)).lerp(new THREE.Color(B.fog), t);
+    fog.density = l(A.density, B.density, t);
   }
 
   /**
@@ -623,11 +798,9 @@ vNormalMapUv = leafUv;
     sound.unlock();
     this.sky.show();
     this.opts.onStart();
-    const site = this.site;
-    if (site) window.setTimeout(() => this.raise(site), 1200);
     const st = this.field.stones[0];
     if (!st) {
-      this.assign(this.sequence[this.seqIndex], true);
+      this.arrive();
       return;
     }
     st.mode = "script";
@@ -702,7 +875,17 @@ vNormalMapUv = leafUv;
     if (k < 1) return;
     this.sinkT = -1;
     this.field.stones.splice(0, 1);
-    this.assign(this.sequence[this.seqIndex], true);
+    this.arrive();
+  }
+
+  /* after the opening strike: the stones break out here, or, if the first scene is somewhere else, the view goes there,
+     a long climb up into the stars first */
+  private arrive() {
+    if (regionOf(this.site) !== this.region) this.fly(4, 3.8, 30);
+    else {
+      this.assign(this.sequence[this.seqIndex], true);
+      this.raise(this.site);
+    }
   }
 
   /** The opening stone: one stone hovering in the middle, ivy over it, a rune like a target cut in it (𐰧, Yenisei ENT). */
@@ -766,6 +949,7 @@ vNormalMapUv = leafUv;
 
   /** Open a project's constellation (the camera turns to it, it writes its name in stars), or close it with -1. */
   setProject(project: number) {
+    if (project >= 0) this.setTengri(false);
     this.openProject = project;
     this.sky.focus(project);
     this.focusDir = project >= 0 ? this.sky.gazeAt(project) : null;
@@ -776,6 +960,23 @@ vNormalMapUv = leafUv;
     if (realm) this.realmProject = project;
     if (realm !== this.realmWant) sound.whoosh(1.6, 0.6);
     this.realmWant = realm;
+  }
+
+  /** Open Teŋri's story in the sky (the view turns to it), or close it. */
+  setTengri(on: boolean) {
+    if (on === this.tengriOpen) return;
+    this.tengriOpen = on;
+    this.sky.openTengri(on);
+    this.focusDir = on ? this.sky.gazeTengri() : this.openProject >= 0 ? this.sky.gazeAt(this.openProject) : null;
+    if (this.focusDir) this.lastFocus = this.focusDir;
+    /* coming back, the sky takes no pointer for a moment, so the word does not light again under it at once */
+    if (!on) this.skyQuietUntil = this.time + 1.2;
+    sound.whoosh(1.8, 0.6);
+  }
+
+  /** Teŋri's story, in the language chosen. */
+  tellTengri(story: Story) {
+    this.sky.tellTengri(story);
   }
 
   /** What the open project's tablet says, at its wall. */
@@ -886,6 +1087,12 @@ vNormalMapUv = leafUv;
     this.pointer.has = false;
   };
   private readonly onDown = (e: PointerEvent) => {
+    /* on Teŋri, or while its story is open, a press is a click */
+    if (this.tengriHover || this.tengriOpen) {
+      this.pressTengri = this.tengriHover;
+      this.press = { x: e.clientX, y: e.clientY, timer: 0 };
+      return;
+    }
     /* on a project constellation, or while one is open, a press is a click, never the start of a drop */
     if (this.hoverProject >= 0 || this.openProject >= 0) {
       this.pressProject = this.hoverProject;
@@ -908,6 +1115,14 @@ vNormalMapUv = leafUv;
     clearTimeout(this.press.timer);
     const dy = e.clientY - this.press.y,
       dx = e.clientX - this.press.x;
+    /* a click on Teŋri opens its story; with it open, a click anywhere closes it */
+    if (this.pressTengri || this.tengriOpen) {
+      if (Math.hypot(dx, dy) < 14) this.setTengri(!this.tengriOpen && this.pressTengri);
+      this.pressTengri = false;
+      this.press = null;
+      if (e.pointerType !== "mouse") this.pointer.has = false;
+      return;
+    }
     if (this.pressProject >= 0 || this.openProject >= 0) {
       /* a click opens the constellation pressed on, or anywhere else closes the open one */
       if (Math.hypot(dx, dy) < 14) {
@@ -971,6 +1186,7 @@ vNormalMapUv = leafUv;
     sound.setVisible(document.visibilityState === "visible");
   private readonly onKey = (e: KeyboardEvent) => {
     sound.unlock();
+    if (e.key === "Escape" && this.tengriOpen) this.setTengri(false);
     if (!this.started) {
       if (
         (e.key === "Enter" || e.key === " ") &&
@@ -1037,7 +1253,7 @@ vNormalMapUv = leafUv;
     this.time += dt;
 
     /* shapes that take turns (MERHABA / HELLO) */
-    if (this.sequence.length > 1 && !this.held) {
+    if (this.sequence.length > 1 && !this.held && this.flightT < 0) {
       this.seqTimer += dt;
       if (this.seqTimer > 4.2 && this.field.settled) {
         this.seqTimer = 0;
@@ -1171,6 +1387,13 @@ vNormalMapUv = leafUv;
       );
     this.lookCur.lerp(this.lookWant, Math.min(1, dt * (focus ? 2.2 : 6)));
     this.camera.lookAt(this.lookCur);
+    /* flying to another place: up a little, the gaze dropping to the ground running by ahead, banking, then down */
+    this.flight(dt);
+    if (this.flightT >= 0) {
+      this.basePos.copy(this.camera.position);
+      this.baseLook.copy(this.lookCur);
+      this.drone(this.flightT);
+    }
     /* over Derinkuyu: the view goes over to the shaft's mouth and looks down it */
     this.derinView += ((this.started && this.site === "derinkuyu" ? 1 : 0) - this.derinView) * Math.min(1, dt * 1.3);
     if (this.derinView > 0.001) {
@@ -1209,7 +1432,13 @@ vNormalMapUv = leafUv;
       this.started && this.pointer.has && !there && this.time > this.skyQuietUntil
         ? this.sky.pick(this.ray.ray.direction)
         : -1;
-    this.canvas.classList.toggle("pick", this.hoverProject >= 0);
+    /* Teŋri's word, when no project is under the pointer */
+    this.tengriHover =
+      this.hoverProject < 0 && this.started && this.pointer.has && !there && !this.tengriOpen && this.time > this.skyQuietUntil
+        ? this.sky.pickTengri(this.ray.ray.direction)
+        : false;
+    this.sky.hoverTengri(this.tengriHover);
+    this.canvas.classList.toggle("pick", this.hoverProject >= 0 || this.tengriHover);
     this.sky.hover(this.hoverProject);
     if (there) this.canvas.classList.toggle("pick", this.pointer.has && !!this.realm.hit(this.ndc));
     /* at a wall the sky is not seen: it is not worked on either */

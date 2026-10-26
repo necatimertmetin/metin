@@ -33,6 +33,9 @@ type Pillar = {
   started: boolean; landed: boolean;
   u: { uLit: { value: number }; uNear: { value: number } };
   near: number;
+  /* half its footprint on the ground (across, along), the ground's height under it, its broken ground */
+  fw: number; fd: number; ground: number;
+  crack: { uOpen: { value: number }; uGlow: { value: number } };
 };
 
 export type EnclosureEvents = {
@@ -100,7 +103,18 @@ export function createEnclosure(uDetail: { value: THREE.Texture }, uRune: { valu
     for (const m of parts) { m.castShadow = true; m.receiveShadow = true; g.add(m); }
     g.rotation.y = rot;
     group.add(g);
-    pillars.push({ g, x, z, rot, tall: foot + H + hh, big, delay, dur: big ? 3.2 : 2.4, k: 0, clock: 0, started: false, landed: false, u, near: 0 });
+    const fw = turtle ? W * 0.68 : W / 2, fd = turtle ? W * 0.58 : D / 2;
+    /* the ground it breaks through: cracked open round its foot, the cracks glowing as it comes up */
+    const crack = { uOpen: { value: 0 }, uGlow: { value: 0 } };
+    const cm = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), crackMaterial({ ...crack, uRune, uSeed: { value: seed } }));
+    cm.rotation.set(-Math.PI / 2, 0, -rot);
+    cm.scale.set(fw * 2 + 1.6, fd * 2 + 1.6, 1);
+    cm.position.set(x, 0, z);
+    cm.renderOrder = 1;
+    group.add(cm);
+    const p: Pillar = { g, x, z, rot, tall: foot + H + hh, big, delay, dur: big ? 3.2 : 2.4, k: 0, clock: 0, started: false, landed: false, u, near: 0, fw, fd, ground: 0, crack };
+    (p as Pillar & { cm: THREE.Mesh }).cm = cm;
+    pillars.push(p);
   };
 
   if (orkhon) {
@@ -160,6 +174,50 @@ export function createEnclosure(uDetail: { value: THREE.Texture }, uRune: { valu
     }
   };
 
+  /*
+   * Stone: rubble heaped round each foot as it comes up (so it never seems to slide out of a clean cut), and chips
+   * thrown out of the broken ground, tumbling, bouncing and coming to rest, then crumbling away.
+   */
+  const rockGeo = roughBlob(1, 1, 1, 3.7);
+  const RUB = 12;
+  const rubble = new THREE.InstancedMesh(rockGeo, headMat, pillars.length * RUB);
+  rubble.castShadow = rubble.receiveShadow = true;
+  rubble.frustumCulled = false;
+  group.add(rubble);
+  const rubbleAt = pillars.flatMap((p, pi) => Array.from({ length: RUB }, (_, j) => {
+    const a = (j / RUB) * Math.PI * 2 + Math.sin(pi * 7 + j) * 0.3, out = 1.05 + 0.25 * Math.abs(Math.sin(j * 3.1 + pi));
+    const lx = Math.cos(a) * (p.fw + 0.06) * out, lz = Math.sin(a) * (p.fd + 0.06) * out;
+    const c = Math.cos(p.rot), s = Math.sin(p.rot);
+    return {
+      x: p.x + lx * c + lz * s, z: p.z - lx * s + lz * c,
+      s: (p.big ? 0.3 : 0.23) * (0.55 + 0.45 * Math.abs(Math.sin(j * 1.7 + pi * 2.3))),
+      r: new THREE.Euler(j * 1.3, j * 2.1 + pi, j * 0.7),
+    };
+  }));
+  const CHIPS = 220;
+  const chipMesh = new THREE.InstancedMesh(rockGeo, headMat, CHIPS);
+  chipMesh.castShadow = true;
+  chipMesh.frustumCulled = false;
+  group.add(chipMesh);
+  const chips = Array.from({ length: CHIPS }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), r: new THREE.Euler(), w: new THREE.Vector3(), s: 0, life: 0, floor: 0 }));
+  let chipNext = 0;
+  const m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), s4 = new THREE.Vector3(), v4 = new THREE.Vector3(), hideM = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let i = 0; i < CHIPS; i++) chipMesh.setMatrixAt(i, hideM);
+  const throwChips = (p: Pillar, n: number, power: number) => {
+    for (let j = 0; j < n; j++) {
+      const c = chips[chipNext];
+      chipNext = (chipNext + 1) % CHIPS;
+      const a = Math.random() * Math.PI * 2, r = Math.random();
+      c.p.set(p.x + Math.cos(a) * (p.fw + 0.05) * (0.6 + r * 0.6), p.ground + 0.05, p.z + Math.sin(a) * (p.fd + 0.05) * (0.6 + r * 0.6));
+      c.v.set(Math.cos(a) * (0.6 + Math.random() * 1.4), (1.6 + Math.random() * 2.6) * power, Math.sin(a) * (0.6 + Math.random() * 1.4));
+      c.r.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      c.w.set(Math.random() * 12 - 6, Math.random() * 12 - 6, Math.random() * 12 - 6);
+      c.s = (p.big ? 0.07 : 0.055) * (0.4 + Math.random() * 0.9);
+      c.life = 3.5 + Math.random() * 2;
+      c.floor = p.ground;
+    }
+  };
+
   let on = false;
   const tmp = new THREE.Vector3();
   const v2 = new THREE.Vector2();
@@ -173,6 +231,16 @@ export function createEnclosure(uDetail: { value: THREE.Texture }, uRune: { valu
       if (want && !cut) { cut = true; uReliefs.value = reliefAtlas(INSCRIPTIONS); }
       for (const p of pillars) { p.clock = 0; p.started = p.k > 0 && want; if (!want) p.landed = false; }
     },
+    /** gone at once, sunk out of sight, nothing lit (for when the view has left this place behind a cloud) */
+    hide() {
+      on = false;
+      for (const p of pillars) { p.k = 0; p.clock = 0; p.started = false; p.landed = false; p.u.uLit.value = 0; p.near = 0; p.crack.uOpen.value = 0; p.crack.uGlow.value = 0; }
+      dLife.fill(0);
+      for (const c of chips) c.life = 0;
+      group.position.z = 0;
+    },
+    /** carried along with the ground running by under a flight, `dz` towards the viewer */
+    slide(dz: number) { group.position.z = dz; },
     /** world units per point-size unit: the view's height in device pixels over twice the tangent of half its field of view */
     resize(px: number) { uPx.value = px; },
     update(dt: number, hh: number, camera: THREE.Camera, ndc: THREE.Vector2, hasPointer: boolean, reduced: boolean) {
@@ -183,12 +251,18 @@ export function createEnclosure(uDetail: { value: THREE.Texture }, uRune: { valu
         p.clock += dt;
         if (on) {
           if (p.clock > p.delay) {
-            if (!p.started) { p.started = true; if (p.k < 1) ev.onGrind(p.x * U, p.big, p.dur); }
+            if (!p.started) { p.started = true; if (p.k < 1) { ev.onGrind(p.x * U, p.big, p.dur); if (!reduced) throwChips(p, p.big ? 22 : 14, 1); } }
             p.k = reduced ? 1 : Math.min(1, p.k + dt / p.dur);
           }
         } else p.k = Math.max(0, p.k - dt / 1.5);
         if (p.k > 0) any = true;
         const ground = (-hh * 0.96 + groundHeight(p.x * U, p.z * U)) / U;
+        p.ground = ground;
+        /* the ground breaks open as it starts, the cracks glowing while it comes up and cooling after */
+        (p as Pillar & { cm: THREE.Mesh }).cm.position.y = ground + 0.012;
+        p.crack.uOpen.value = THREE.MathUtils.smoothstep(p.k, 0, 0.12);
+        const glowWant = p.k > 0 && p.k < 1 ? 1 : 0;
+        p.crack.uGlow.value += (glowWant - p.crack.uGlow.value) * Math.min(1, dt * (glowWant ? 4 : 0.5));
         const top = ground - 0.1, bottom = ground - p.tall - 0.3;
         /* grinding: slow to start, heaviest at the end, where it settles */
         const k = p.k, e = on ? 1 - (1 - k) ** 2.4 : k * k * (3 - 2 * k);
@@ -196,11 +270,14 @@ export function createEnclosure(uDetail: { value: THREE.Texture }, uRune: { valu
         const amp = moving ? (p.big ? 0.01 : 0.014) * (on ? 1 : 0.5) : 0;
         p.g.position.set(p.x + Math.sin(uTime.value * 43 + i) * amp * 0.6, bottom + (top - bottom) * e, p.z);
         p.g.rotation.set(Math.sin(uTime.value * 31 + i * 1.7) * amp, p.rot, Math.sin(uTime.value * 27 + i * 2.3) * amp);
-        if (moving && on && !reduced) puff(p, ground, Math.random() < dt * (p.big ? 70 : 45) ? 1 : 0);
+        if (moving && on && !reduced) {
+          puff(p, ground, Math.random() < dt * (p.big ? 70 : 45) ? 1 : 0);
+          if (Math.random() < dt * (p.big ? 9 : 6)) throwChips(p, 1, 0.6);
+        }
         if (on && k >= 1 && !p.landed) {
           p.landed = true;
           ev.onLand(p.x * U, p.big);
-          if (!reduced) puff(p, ground, p.big ? 26 : 14);
+          if (!reduced) { puff(p, ground, p.big ? 26 : 14); throwChips(p, p.big ? 10 : 6, 0.55); }
         }
         /* its carvings wake once it stands, from the foot up; they go dark at once as it sinks */
         const lit = p.landed ? 1 : 0;
@@ -212,6 +289,33 @@ export function createEnclosure(uDetail: { value: THREE.Texture }, uRune: { valu
         p.near += (want - p.near) * Math.min(1, dt * 5);
         p.u.uNear.value = p.near;
       }
+      /* the rubble round each foot, heaping up as it rises */
+      pillars.forEach((p, pi) => {
+        const grow = THREE.MathUtils.smoothstep(p.k, 0.02, 0.35);
+        for (let j = 0; j < RUB; j++) {
+          const r = rubbleAt[pi * RUB + j], s = r.s * grow;
+          rubble.setMatrixAt(pi * RUB + j, s > 0.001 ? m4.compose(v4.set(r.x, p.ground + s * 0.15, r.z), q4.setFromEuler(r.r), s4.set(s * 1.3, s * 0.8, s)) : hideM);
+        }
+      });
+      rubble.instanceMatrix.needsUpdate = true;
+      /* the chips: flying, bouncing, resting, then crumbling away */
+      for (let i = 0; i < CHIPS; i++) {
+        const c = chips[i];
+        if (c.life <= 0) continue;
+        c.life -= dt;
+        c.v.y -= 9 * dt;
+        c.p.addScaledVector(c.v, dt);
+        if (c.p.y < c.floor + c.s * 0.4) {
+          c.p.y = c.floor + c.s * 0.4;
+          c.v.y = Math.abs(c.v.y) > 0.6 ? -c.v.y * 0.32 : 0;
+          c.v.x *= 0.55; c.v.z *= 0.55;
+          c.w.multiplyScalar(0.5);
+        }
+        c.r.x += c.w.x * dt; c.r.y += c.w.y * dt; c.r.z += c.w.z * dt;
+        const s = c.life > 0 ? c.s * Math.min(1, c.life / 0.8) : 0;
+        chipMesh.setMatrixAt(i, s > 0 ? m4.compose(c.p, q4.setFromEuler(c.r), s4.setScalar(s)) : hideM);
+      }
+      chipMesh.instanceMatrix.needsUpdate = true;
       /* the dust drifts out and up, slowing, and thins away */
       let live = false;
       for (let i = 0; i < DUST; i++) {
@@ -360,6 +464,38 @@ export function roughBox(w: number, h: number, d: number, seed: number, taper: n
   }
   g.computeVertexNormals();
   return g;
+}
+
+/*
+ * The broken ground round a foot: the earth darkened and torn, cracks running out from it; while the stone comes up
+ * the cracks glow with the place's light, then cool. `uOpen` how far it has broken, `uGlow` how hot the cracks are.
+ */
+function crackMaterial(u: Record<string, { value: unknown }>) {
+  return new THREE.ShaderMaterial({
+    uniforms: u,
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    fragmentShader: /* glsl */ `
+      ${NOISE3}
+      uniform float uOpen; uniform float uGlow; uniform vec3 uRune; uniform float uSeed; varying vec2 vUv;
+      void main(){
+        if (uOpen < .003) discard;
+        vec2 p = vUv * 2. - 1.;
+        float r = length(p), ang = atan(p.y, p.x);
+        float reach = uOpen * (.75 + .25 * n3(vec3(ang * 2., uSeed, 0.)));
+        /* cracks running outwards, wandering */
+        float w = ang * 4.5 + (n3(vec3(r * 5., ang * 1.5, uSeed)) - .5) * 3.;
+        float crack = smoothstep(.13, .0, abs(fract(w / 3.14159) - .5) * (1.6 + r * 2.)) * step(r, reach) * smoothstep(1., .55, r);
+        /* finer branches */
+        float w2 = ang * 11. + (n3(vec3(r * 9., ang * 3., uSeed + 5.)) - .5) * 5.;
+        crack = max(crack, smoothstep(.09, .0, abs(fract(w2 / 3.14159) - .5) * (2. + r * 3.)) * step(r, reach * .7) * .7);
+        /* the earth round the foot torn and darkened */
+        float torn = (1. - smoothstep(.25, .8 * reach + .1, r)) * (.55 + .45 * n3(vec3(p * 6., uSeed)));
+        float a = clamp(torn * .65 + crack * .9, 0., 1.) * uOpen;
+        vec3 col = mix(vec3(.025, .02, .016), uRune * 1.6 + vec3(.25, .1, 0.), crack * uGlow);
+        gl_FragColor = vec4(col, a);
+      }`,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
 }
 
 /* a rounded crown for a stele: a half disc standing on its flat side, `w` wide, `h` high, `d` thick, its edges worn */

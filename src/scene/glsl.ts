@@ -135,6 +135,8 @@ export const GROUND_FN = /* glsl */ `
 /* the grain of real stone (see uDetail in RuinsScene), as on the stones; groundAlbedo leaves what it read in gTex */
 uniform sampler2D uDetail;
 vec3 gTex;
+/* how far the ground's pattern has been carried along by a flight (see GROUND_COLOR); the island of light stays put */
+vec2 gShift = vec2(0.);
 /*
  * The picture without its repeat: across the ground, slowly varying noise picks one of eight versions of it, each turned
  * and shifted its own way, and blends between neighbouring versions where they meet, so no grid of copies shows.
@@ -189,20 +191,34 @@ vec3 groundAlbedo(vec3 p, out float gcrack, out float gmoss, out float gfine) {
   /* and a touch cooler: the stones' faces catch the cool fill light, the ground only the warm sun and sky */
   c *= vec3(.92, .96, 1.07);
   /* the rock is an island of stone under the shapes; away from them it sinks into the dark */
-  c *= smoothstep(14., 2., length(p.xz - vec2(0., -2.)));
+  c *= smoothstep(14., 2., length(p.xz - gShift - vec2(0., -2.)));
   return c;
 }
 `;
 
 /** The ground rock: the shared albedo, then the holes stones left, cut right through it. */
 export const GROUND_COLOR = /* glsl */ `
-vec3 gw = vGPos * 3. + 19.;
+/* flying over it, the ground runs on under the view: its pattern is read further along by how far the view has come */
+vec3 gP = vGPos + vec3(uTravel.x, 0., uTravel.y);
+gShift = uTravel;
+vec3 gw = gP * 3. + 19.;
 float gcrack, gmoss, gfine;
-vec3 groundC = groundAlbedo(vGPos, gcrack, gmoss, gfine);
-vec4 grt = groundRune(vGPos);
+vec3 groundC = groundAlbedo(gP, gcrack, gmoss, gfine);
+vec4 grt = groundRune(gP) * uHome;
 groundC *= 1. - grt.b * .5;
+/* away from home the rock takes the place's colour, and on the steppe dry grass grows over it in tufts */
+groundC *= uTint;
+if (uGrass > 0.) {
+  /* tufts from two noises at a slant to each other and a soft edge, so no grid shows through */
+  vec2 gq = mat2(.8, -.6, .6, .8) * gP.xz;
+  float tuft = smoothstep(.36, .82, fbm3(vec3(gq * 2.6, .5)) * .6 + fbm3(vec3(gq.yx * 6.3, 7.)) * .4);
+  float blade = n3(vec3(gP.x * 40., gP.z * 9., 0.));
+  vec3 grassC = mix(vec3(.055, .07, .03), vec3(.15, .16, .07), blade) * (.75 + .5 * fbm3(gP * .7));
+  /* the grass stays on the plain; the far mountains' slopes are bare dark rock */
+  groundC = mix(groundC, grassC, uGrass * (.3 + .6 * tuft) * (1. - smoothstep(-1.5, 2.5, vGPos.y)));
+}
 /* holes left where stones broke out: dark inside, shaded down their walls */
-vec4 gh = texture2D(uHoles, vec2((vGPos.x + uHolesRect.x) / uHolesRect.z, 1. - (vGPos.z - uHolesRect.y) / uHolesRect.w));
+vec4 gh = texture2D(uHoles, vec2((vGPos.x + uHolesRect.x) / uHolesRect.z, 1. - (vGPos.z - uHolesRect.y) / uHolesRect.w)) * uHoleOn;
 /* inside a hole there is no ground at all: the pit below shows through */
 if (gh.r > .5) discard;
 groundC *= 1. - gh.g * .45;
