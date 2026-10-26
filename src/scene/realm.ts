@@ -156,10 +156,10 @@ function headMaterial(uTint: { value: THREE.Color }, pu: PieceUniforms) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uTint }, pu);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vStone; varying float vFace;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvStone = position.xy;\nvFace = step(.7, normal.z);');
+      .replace('#include <common>', '#include <common>\nvarying vec2 vStone; varying float vFace; varying float vRim;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvStone = position.xy;\nvFace = step(.7, normal.z);\nvRim = smoothstep(.97, .55, normal.z) * smoothstep(.05, .3, normal.z);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\n#define WINE .35\n${NOISE3}\nvarying vec2 vStone; varying float vFace; uniform vec3 uTint;
+      .replace('#include <common>', `#include <common>\n#define WINE .35\n${NOISE3}\nvarying vec2 vStone; varying float vFace; varying float vRim; uniform vec3 uTint;
 uniform sampler2D uLogo; uniform float uLogoSpan; uniform vec3 uGlow; uniform float uRuneOn; uniform float uRuneLight;\nuniform sampler2D uPic; uniform vec2 uPicSize;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
 ${GRADE}
@@ -171,12 +171,16 @@ diffuseColor.rgb *= 1. - lt.a * .7;
 vec2 puv = vStone / uPicSize + .5;
 /* read softened (a coarser level of the picture), so the colour reaches over the edges and down the sides too */
 vec4 pic = uRuneOn > .5 && puv.x > 0. && puv.y > 0. && puv.x < 1. && puv.y < 1. ? texture2D(uPic, puv, 3.) : vec4(0.);
-float bright = smoothstep(.5, .8, dot(pic.rgb, vec3(.3, .59, .11)) / max(pic.a, .01)) * smoothstep(.2, .5, pic.a);
+/* only well inside the logo's shapes: a pale outline round a logo (SyncroSale's) would otherwise draw a bright line round the stone */
+float bright = smoothstep(.5, .8, dot(pic.rgb, vec3(.3, .59, .11)) / max(pic.a, .01)) * smoothstep(.75, .95, pic.a);
 /* the stone itself takes the logo's colour there (Padoboard's lit pads are green stone) */
 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * .35 + pic.rgb / max(pic.a, .01) * .2, bright * .9);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 /* burning in the realm's colour, a little of the letters' own brightness at their hearts */
-totalEmissiveRadiance += (uGlow * .85 + lt.rgb * .15) * lt.a * uRuneLight + uGlow * bright * .05 * uRuneLight;`);
+totalEmissiveRadiance += (uGlow * .85 + lt.rgb * .15) * lt.a * uRuneLight + uGlow * bright * .05 * uRuneLight;
+/* its worn edge, here and there, catching a little of the light from the hollow behind it: broken by the stone's grain, faint */
+float rimGrain = smoothstep(.42, .8, n3(vec3(vStone * 16., 1.))) * (.6 + .4 * n3(vec3(vStone * 3.5, 4.)));
+totalEmissiveRadiance += uGlow * vRim * rimGrain * uRuneOn * uRuneLight * .16;`);
   };
   return mat;
 }
@@ -595,6 +599,9 @@ totalEmissiveRadiance *= .25 + 1.6 * smoothstep(.17, .02, ed) * (.8 + .4 * n3(ve
   const pressClose = () => { btnPress = 0; sound.hit(0.35, 0.4, 0.6); };
 
   const ray = new THREE.Raycaster(), local = new THREE.Vector3();
+  /* the wall as the flat face it is (its relief is a fifth of a unit deep): the pointer is found on that, not by testing
+     every one of the half million triangles of its mesh, which every frame brought the walls down to a crawl */
+  const wallPlane = new THREE.Plane();
   const within = (r: { x: number; y: number; w: number; h: number } | null, px: number, py: number) => !!r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
   /** What of the words on the wall is under the pointer (`ndc`, -1 to 1): the close seal, the link, or nothing. */
   const hit = (ndc: THREE.Vector2): 'close' | 'link' | null => {
@@ -607,9 +614,10 @@ totalEmissiveRadiance *= .25 + 1.6 * smoothstep(.17, .02, ed) * (.8 + .4 * n3(ve
     ray.setFromCamera(ndc, camera);
     if (ray.intersectObject(button, false).length) return 'close';
     if (!cardHit) return null;
-    const h = ray.intersectObject(wall, false)[0];
-    if (!h) return null;
-    wall.worldToLocal(local.copy(h.point));
+    wall.updateMatrixWorld();
+    wallPlane.set(new THREE.Vector3(0, 0, 1), 0).applyMatrix4(wall.matrixWorld);
+    if (!ray.ray.intersectPlane(wallPlane, local)) return null;
+    wall.worldToLocal(local);
     const px = ((local.x - CX) / CW + 0.5) * TW, py = (0.5 - (local.y - CY) / CH) * TH;
     if (within(cardHit.link, px, py)) return 'link';
     return null;
