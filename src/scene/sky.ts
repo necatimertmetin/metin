@@ -581,6 +581,12 @@ export function createSky(uRune: { value: THREE.Color }, projects: SkyProject[] 
       }
       uVanish.value = Math.max(uVanish.value, Math.min(1, o * 2));
     });
+    /* the one closed has finished saying goodbye: it no longer counts as open (else hovering it later would lean the
+       view in on the middle of the sky, as if it were opened) */
+    if (closing >= 0) {
+      const n = nebulae.find((m) => m && m.ki === closing);
+      if (!n || (n.mat.uniforms.uOpen.value <= 0 && !n.face?.leaving())) closing = -1;
+    }
     nameMat.uniforms.uT.value += dt;
     nameMat.uniforms.uFade.value += (nameTarget - nameMat.uniforms.uFade.value) * Math.min(1, dt * (nameTarget ? 2 : 4));
     /* shooting star */
