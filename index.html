@@ -19,8 +19,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Hanken+Grotesk:wght@400;500;600&family=Inter+Tight:wght@700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Old+Turkic&display=swap" />
+    <style>
+      /* the loader lives here, not in the app, so it shows before any script has run; it moves on the compositor, so it keeps moving while the page works */
+      html { background: #0b0c0e; }
+      #boot { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; pointer-events: none; color: #8d8f94; font: 500 11px/1 ui-monospace, "JetBrains Mono", Consolas, monospace; letter-spacing: 0.32em; text-transform: uppercase; transition: opacity 0.7s; }
+      #boot.gone { opacity: 0; }
+      #boot i { position: relative; display: block; width: min(220px, 56vw); height: 1px; overflow: hidden; background: #26282c; }
+      #boot i::before { content: ""; position: absolute; inset: 0; background: #d9b88a; transform-origin: left; transform: scaleX(var(--share, 0)); transition: transform 0.35s ease-out; }
+      #boot i::after { content: ""; position: absolute; inset: 0; width: 30%; background: linear-gradient(90deg, transparent, #f4e3c6, transparent); animation: boot-sweep 1.5s linear infinite; }
+      @keyframes boot-sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+      @media (prefers-reduced-motion: reduce) { #boot i::after { animation: none; opacity: 0; } }
+    </style>
   </head>
   <body>
+    <div id="boot" role="status"><span>Loading</span><i></i></div>
+    <script>document.querySelector('#boot span').textContent = /^tr/i.test(navigator.language || '') ? 'Taşlar yontuluyor' : 'Carving the stones';</script>
     <div id="root"></div>
     <noscript>Mert Metin, frontend and browser-extension developer. This site needs JavaScript for its 3D scene. Contact: necatimertmetin@gmail.com</noscript>
     <script type="module" src="/src/main.tsx"></script>

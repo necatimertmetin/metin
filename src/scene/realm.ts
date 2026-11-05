@@ -304,6 +304,9 @@ function haloTexture(shapes: THREE.Shape[], span: number, fill = false) {
 }
 
 /** What a project's wall says. */
+/** the widest a project's name may run on the wall, on its picture */
+const TITLE_MAX = 620;
+
 export type Card = { kicker: string; title: string; role: string; body: string; close: string; link?: { label: string; href: string } };
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -337,11 +340,14 @@ function layoutCard(card: Card): Layout {
   run(card.kicker.toUpperCase(), M, y, '900 30px "Cinzel", serif', 7, 0.3, 0.025);
   y += 66;
   /* the title: each letter first an Old Turkic one, turning into itself in turn */
-  const tf = '900 100px "Cinzel", serif';
+  /* a long name comes down in size, so it stops short of the stone button */
+  measure.font = '900 100px "Cinzel", serif';
+  const titleSize = Math.min(100, Math.floor((100 * TITLE_MAX) / measure.measureText(card.title).width));
+  const tf = `900 ${titleSize}px "Cinzel", serif`;
   measure.font = tf;
   let x = M - 4;
   [...card.title].forEach((ch, i) => {
-    glyphs.push({ ch, x, y, w: measure.measureText(ch).width, size: 100, font: tf, at: 0.5 + i * 0.05, rune: GLYPHS[(ch.charCodeAt(0) * 7 + i * 13) % GLYPHS.length], turn: 1.4 + i * 0.09 });
+    glyphs.push({ ch, x, y, w: measure.measureText(ch).width, size: titleSize, font: tf, at: 0.5 + i * 0.05, rune: GLYPHS[(ch.charCodeAt(0) * 7 + i * 13) % GLYPHS.length], turn: 1.4 + i * 0.09 });
     x += measure.measureText(ch).width;
   });
   y += 124;

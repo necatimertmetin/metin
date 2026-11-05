@@ -17,6 +17,8 @@ export default function App() {
   const [volume, setVolume] = useState(sound.volume);
   /* nothing but the opening stone shows until the visitor strikes it */
   const [started, setStarted] = useState(false);
+  /* the scene has made its shaders ready: the loader in index.html goes and the stone fades in */
+  const [ready, setReady] = useState(false);
   /* the project whose constellation is open in the sky, -1 for none */
   const [project, setProject] = useState(-1);
 
@@ -38,15 +40,26 @@ export default function App() {
         })),
         onProject: setProject,
         site: SCENES[0].monuments,
+        onProgress: (share) => document.getElementById('boot')?.style.setProperty('--share', share.toFixed(3)),
+        onReady: () => setReady(true),
       });
     } catch {
       setNoGL(true);
       setStarted(true);
+      setReady(true);
     }
     return () => { ruins.current?.dispose(); ruins.current = null; };
   }, [step]);
 
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const boot = document.getElementById('boot');
+    boot?.classList.add('gone');
+    const t = window.setTimeout(() => boot?.remove(), 900);
+    return () => clearTimeout(t);
+  }, [ready]);
 
   /* Teŋri's story in the sky follows the language */
   useEffect(() => { ruins.current?.tellTengri(TENGRI[lang]); }, [lang]);
@@ -78,7 +91,7 @@ export default function App() {
   const open = project >= 0 ? PROJECTS[project] : null;
   return (
     <>
-      <canvas ref={canvas} className="stage" aria-hidden="true" />
+      <canvas ref={canvas} className={`stage${ready ? ' on' : ''}`} aria-hidden="true" />
       <Cursor />
       {noGL && <div className="fallback" aria-hidden="true">{scene.shapes.flatMap((s) => ('text' in s ? [s.text] : [])).pop() ?? scene.title[lang]}</div>}
 
@@ -109,7 +122,7 @@ export default function App() {
         </section>
       </main>
 
-      {!noGL && (
+      {!noGL && ready && (
         <>
           <button type="button" className={`gate${started ? ' gone' : ''}`} aria-label={`${UI.begin[lang]}: ${UI.beginNote[lang]}`}
             tabIndex={started ? -1 : 0} onClick={() => ruins.current?.start()} />

@@ -19,7 +19,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .mono { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; opacity: 0; transition: opacity 1.1s ease; }
+.stage.on { opacity: 1; }
 .stage.held { cursor: grabbing; }
 /* with a mouse, a glowing rune stands in for the cursor over the scene (see Cursor.tsx) */
 @media (pointer: fine) { .stage, .stage.held { cursor: none; } }

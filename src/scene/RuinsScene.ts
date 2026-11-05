@@ -55,6 +55,12 @@ function loadDetail() {
   t.anisotropy = 8;
   return t;
 }
+const pause = (ms: number) => new Promise<void>((done) => window.setTimeout(done, ms));
+/* the opening: how much of the bar the pictures take, and how long to wait for them and for any one shader */
+const PICTURES_SHARE = 0.2;
+const PICTURES_WAIT = 10000;
+const SHADER_WAIT = 12000;
+const SHADERS_AT_ONCE = 3;
 const MAX_LEAVES = 6000;
 const MAX_STEMS = 16000;
 const MAX_PITS = 2400;
@@ -72,6 +78,10 @@ export type RuinsOptions = {
   /** the project constellations in the sky */
   projects?: SkyProject[];
   /** a project constellation was touched (its index), or the open one closed (-1) */
+  /** how far the opening's preparation has come, 0 to 1 */
+  onProgress?: (share: number) => void;
+  /** the first frame is on screen */
+  onReady?: () => void;
   onProject?: (project: number) => void;
   /** the monuments the first scene raises (or Derinkuyu, which it opens), if any */
   site?: Site | "derinkuyu";
@@ -228,13 +238,14 @@ export class RuinsScene {
   private readonly look = new THREE.Vector3(0, -0.1, 0);
 
   private readonly canvas: HTMLCanvasElement;
+  /** the opening's preparation is done and the loop runs */
+  private ready = false;
+  private disposed = false;
 
   constructor(canvas: HTMLCanvasElement, first: Shape[], opts: RuinsOptions) {
     this.canvas = canvas;
     this.opts = opts;
     this.realm.useProjects(opts.projects ?? []);
-    /* the walls' shaders are made ready in the background, so the first visit to one doesn't stall */
-    window.setTimeout(() => this.renderer.compile(this.realm.scene, this.realm.camera), 2500);
     this.field = new StoneField(this.reduced);
     /* a stone breaking out of the ground leaves its hole behind */
     this.field.onBreak = (x, y, z, w, d, depth, angle) => {
@@ -260,7 +271,6 @@ export class RuinsScene {
     /* night air: the distance fades into a faint blue-grey haze rather than staying sharp, as it would on the Moon */
     scene.fog = new THREE.FogExp2(0x161a21, 0.034);
     scene.background = createBackdrop();
-    scene.environment = createEnvironment(r);
 
     /* daylight: a warm sun high and in front to the left, sky and ground bounce, a cool fill and a warm rim from behind */
     scene.add(new THREE.HemisphereLight(0xcfdcf2, 0x6a5a46, 0.28 * PI));
@@ -605,17 +615,6 @@ vNormalMapUv = leafUv;
     scene.add(this.leafMesh);
 
     this.resize();
-    /* the physics engine loads in the background, in its own chunk, so it never holds up the opening */
-    import("./physics")
-      .then((m) => m.StonePhysics.create())
-      .then((p) => {
-        p.setGround(-this.hh * 0.96);
-        p.onHit = (strength, x, size) => this.land(strength, x, size);
-        this.physics = p;
-      })
-      .catch(() => {
-        /* no WebAssembly: the simple fall stays */
-      });
     /* first only the one stone, waiting to be struck */
     this.runeTarget.set(first[0].runeColor ?? RUNE_COLOR);
     this.uni.uRune.value.copy(this.runeTarget);
@@ -637,7 +636,105 @@ vNormalMapUv = leafUv;
       .catch(() => {
         /* fonts are optional; the system fallbacks still draw */
       });
+    void this.prepare();
+  }
+
+  /**
+   * The safe opening. The first frame used to compile every shader at once, which held the whole browser for seconds on
+   * a fresh visit. Here the pictures come first, then the shaders one at a time on the driver's own threads, with the
+   * page free between them; the loop starts only when a frame can be drawn at once. If anything fails or hangs the
+   * scene opens anyway: shaders still missing then simply compile when first used, as they always did.
+   */
+  private async prepare() {
+    const report = (share: number) => this.opts.onProgress?.(share);
+    try {
+      /* the sky's light for reflections takes half a second to make: on its own, once the loader has painted */
+      await pause(0);
+      if (this.disposed) return;
+      this.scene.environment = createEnvironment(this.renderer);
+      await this.picturesLoaded();
+      report(PICTURES_SHARE);
+      await this.compileInTurn(this.scene, this.camera, (share) => report(PICTURES_SHARE + (0.97 - PICTURES_SHARE) * share));
+      if (this.disposed) return;
+      this.warmUp();
+    } catch {
+      /* the scene opens as it is */
+    }
+    if (this.disposed) return;
+    report(1);
+    this.ready = true;
     this.raf = requestAnimationFrame(this.frame);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (this.disposed) return;
+      this.opts.onReady?.();
+      void this.prepareRest();
+    }));
+  }
+
+  /** What can wait until the stone is on screen: the rigid-body engine, in its own chunk, then the project walls' shaders. */
+  private async prepareRest() {
+    await pause(400);
+    try {
+      const { StonePhysics } = await import("./physics");
+      const p = await StonePhysics.create();
+      if (this.disposed) return;
+      p.setGround(-this.hh * 0.96);
+      p.onHit = (strength, x, size) => this.land(strength, x, size);
+      this.physics = p;
+    } catch {
+      /* no WebAssembly: the simple fall stays */
+    }
+    try {
+      await this.compileInTurn(this.realm.scene, this.realm.camera);
+    } catch {
+      /* the walls compile when first opened */
+    }
+  }
+
+  /** Until every picture is in, however long the network takes, within reason. */
+  private picturesLoaded() {
+    const m = THREE.DefaultLoadingManager;
+    return new Promise<void>((done) => {
+      m.onProgress = (_url, loaded, total) => this.opts.onProgress?.((PICTURES_SHARE * loaded) / total);
+      m.onLoad = () => done();
+      window.setTimeout(done, PICTURES_WAIT);
+    });
+  }
+
+  /**
+   * Every object's shader, a few at a time: the driver makes them on its own threads, so the page stays free, and the
+   * limit keeps them from taking the whole machine at once.
+   */
+  private async compileInTurn(scene: THREE.Scene, camera: THREE.Camera, report?: (share: number) => void) {
+    const parts: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if ((o as THREE.Mesh).material) parts.push(o);
+    });
+    let next = 0, done = 0;
+    const worker = async () => {
+      while (next < parts.length && !this.disposed) {
+        const part = parts[next++];
+        await Promise.race([this.renderer.compileAsync(part, camera, scene), pause(SHADER_WAIT)]);
+        report?.(++done / parts.length);
+        await pause(0);
+      }
+    };
+    await Promise.all(Array.from({ length: SHADERS_AT_ONCE }, worker));
+  }
+
+  /**
+   * One frame nobody sees, with everything in it for a moment: it uploads the pictures and makes the shadows' shaders,
+   * which `compile` can't reach, so the first strike and the first monument don't stall.
+   */
+  private warmUp() {
+    const meshes = [this.stemMesh, this.leafMesh, this.pitMesh];
+    const counts = meshes.map((m) => m.count);
+    const hidden = [...this.monuments.values()].map((m) => m.group).filter((g) => !g.visible);
+    meshes.forEach((m) => (m.count = Math.max(1, m.count)));
+    hidden.forEach((g) => (g.visible = true));
+    this.renderer.render(this.scene, this.camera);
+    meshes.forEach((m, i) => (m.count = counts[i]));
+    hidden.forEach((g) => (g.visible = false));
   }
 
   /** Float the stones into a shape; several shapes take turns every few seconds. */
@@ -793,7 +890,7 @@ vNormalMapUv = leafUv;
    * the stones break out of the rock. The struck stone rises again and takes its place among them.
    */
   start() {
-    if (this.started) return;
+    if (this.started || !this.ready) return;
     this.started = true;
     sound.unlock();
     this.sky.show();
@@ -927,6 +1024,7 @@ vNormalMapUv = leafUv;
   }
 
   dispose() {
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.unbind();
     this.renderer.dispose();
