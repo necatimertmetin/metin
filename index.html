@@ -19,11 +19,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Hanken+Grotesk:wght@400;500;600&family=Inter+Tight:wght@700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Old+Turkic&display=swap" />
-    <script type="module" crossorigin src="/metin/assets/index-CJl4l7iP.js"></script>
-    <link rel="stylesheet" crossorigin href="/metin/assets/index-CfjtWuOw.css">
+    <style>html{background:#0b0c0e}#boot{z-index:5;pointer-events:none;color:#8d8f94;letter-spacing:.32em;text-transform:uppercase;flex-direction:column;justify-content:center;align-items:center;gap:14px;font:500 11px/1 ui-monospace,JetBrains Mono,Consolas,monospace;transition:opacity .7s;display:flex;position:fixed;inset:0}#boot.gone{opacity:0}#boot i{background:#26282c;width:min(220px,56vw);height:1px;display:block;position:relative;overflow:hidden}#boot i:before{content:"";transform-origin:0;transform:scaleX(var(--share,0));background:#d9b88a;transition:transform .35s ease-out;position:absolute;inset:0}#boot i:after{content:"";background:linear-gradient(90deg,#0000,#f4e3c6,#0000);width:30%;animation:1.5s linear infinite boot-sweep;position:absolute;inset:0}@keyframes boot-sweep{0%{transform:translate(-100%)}to{transform:translate(340%)}}@media (prefers-reduced-motion:reduce){#boot i:after{opacity:0;animation:none}}</style>
+    <script type="module" crossorigin src="/metin/assets/index-EYzKt7XE.js"></script>
+    <link rel="stylesheet" crossorigin href="/metin/assets/index-BJCOl795.css">
   </head>
   <body>
+    <div id="boot" role="status"><span>Loading</span><i></i></div>
+    <script>document.querySelector('#boot span').textContent = /^tr/i.test(navigator.language || '') ? 'Taşlar yontuluyor' : 'Carving the stones';</script>
     <div id="root"></div>
-    <noscript>Mert Metin, frontend and browser-extension developer. This site needs JavaScript for its 3D scene. Contact: necatimertmetin@gmail.com</noscript>
+    <noscript>Mert Metin, frontend and browser-extension developer. This site needs JavaScript for its 3D scene. Contact: necatimertmetin@gmail.com</noscript>
   </body>
 </html>
